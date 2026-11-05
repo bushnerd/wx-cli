@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/r266-tech/wx-cli/v2/internal/config"
 	"github.com/r266-tech/wx-cli/v2/internal/wcdb"
@@ -234,13 +235,53 @@ func TestAssistantSessionFilterAndCursorHelp(t *testing.T) {
 }
 
 func TestUsableStaleMetadataCacheKeepsRuntimeReady(t *testing.T) {
-	s, _ := liveSessionFixture(t)
+	s, root := liveSessionFixture(t)
+	// Record the current source metadata in the index, as a refresh does.
+	paths, err := cachePathsFor(s.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sources, err := listSourceDBs(s.cfg, paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := wcdb.OpenPlain(paths.IndexPath, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, src := range sources {
+		if err := db.ExecArgs(`INSERT OR REPLACE INTO cache_files (rel_path, source_path, snapshot_path, db_mtime, wal_mtime, salt_hex, status, error, copied_at) VALUES (?, ?, '', ?, ?, ?, 'live', '', 0)`,
+			src.RelPath, src.Source, src.DBMTime, src.WALMTime, src.SaltHex); err != nil {
+			db.Close()
+			t.Fatal(err)
+		}
+	}
+	db.Close()
+	if status := s.readOSStatus(false); status["readiness"] != "ready" {
+		t.Fatalf("fresh index not ready: %#v", status)
+	}
+	// WeChat writes session.db on every message: the index becomes stale but
+	// stays usable, and readers refresh it in the background.
+	later := time.Now().Add(time.Minute)
+	if err := os.Chtimes(filepath.Join(root, "db_storage", "session", "session.db"), later, later); err != nil {
+		t.Fatal(err)
+	}
 	status := s.readOSStatus(false)
 	cache, _ := status["metadata_cache"].(map[string]any)
 	if cache["stale"] != true || cache["refresh"] != "automatic" {
-		t.Fatalf("fixture cache not reported as usable-stale: %#v", cache)
+		t.Fatalf("usable stale index not reported as stale: %#v", cache)
 	}
 	if status["readiness"] != "ready" || cache["degraded"] != nil || status["degraded_by"] != nil {
 		t.Fatalf("usable stale metadata degraded a live-readable runtime: %#v", status)
+	}
+}
+
+func TestUnusableMetadataCacheStillDegradesRuntime(t *testing.T) {
+	s, _ := liveSessionFixture(t)
+	// The fixture index has no source metadata, so it cannot be trusted.
+	status := s.readOSStatus(false)
+	cache, _ := status["metadata_cache"].(map[string]any)
+	if status["readiness"] != "degraded" || cache["degraded"] != true || cache["blocked_reason"] == nil {
+		t.Fatalf("unusable metadata index not reported as degraded: %#v", status)
 	}
 }
