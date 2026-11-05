@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 
 	"github.com/r266-tech/wx-cli/v2/internal/keystore"
@@ -117,18 +118,46 @@ func LoadWithKeychainAuthorization() (*Config, error) {
 	return c, nil
 }
 
+// restrictConfigFile tightens an open config to 0600 before it is read. Writes
+// are always 0600, but a restored or copied file may not be, and a legacy
+// config holds database keys. It acts on the handle, not the path.
+func restrictConfigFile(f *os.File) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if info.Mode().Perm()&0o077 == 0 {
+		return nil
+	}
+	if err := f.Chmod(0o600); err != nil {
+		return errors.New("config file is readable by other users and could not be restricted to 0600")
+	}
+	return nil
+}
+
 func loadPersistentConfig() (*Config, error) {
 	p, err := Path()
 	if err != nil {
 		return nil, err
 	}
-	b, err := os.ReadFile(p)
+	f, err := os.Open(p)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			cfg := &Config{}
 			applyEnvOverrides(cfg)
 			return cfg, nil
 		}
+		return nil, err
+	}
+	defer f.Close()
+	if err := restrictConfigFile(f); err != nil {
+		return nil, err
+	}
+	b, err := io.ReadAll(f)
+	if err != nil {
 		return nil, err
 	}
 	var c Config
@@ -179,6 +208,9 @@ type MigrationResult struct {
 	Migrated  bool
 	KeyCount  int
 	Reference string
+	// ResidueRemoved reports that an already-migrated config file still held
+	// plaintext image keys (left by older releases) and they were stripped.
+	ResidueRemoved bool
 }
 
 // MigratePersistentToKeychain serializes backup, Keychain verification and the
@@ -198,12 +230,32 @@ func MigratePersistentToKeychain(backup func(*Config) error) (MigrationResult, e
 		if err != nil {
 			return err
 		}
+		raw := *cfg
 		applyEnvOverrides(cfg)
 		if err := hydrateRuntimeKeys(cfg); err != nil {
 			return err
 		}
 		if cfg.KeyStore == "keychain" {
 			result = MigrationResult{KeyCount: len(cfg.Keys), Reference: cfg.KeyStoreRef}
+			if raw.ImageKey == "" && raw.ImageXORKey == nil {
+				return nil
+			}
+			// Strip the file copy only when Keychain holds the same kind of
+			// key, so the plaintext copy is never the only one.
+			record, err := runtimeKeyLoad(cfg.DBRoot, cfg.Wxid)
+			if err != nil || record == nil || (raw.ImageKey != "" && record.ImageKey == "") || (raw.ImageXORKey != nil && record.ImageXORKey == nil) {
+				return nil
+			}
+			raw.ImageKey = ""
+			raw.ImageXORKey = nil
+			b, err := json.MarshalIndent(&raw, "", "  ")
+			if err != nil {
+				return err
+			}
+			if err := writeConfigToRoot(root, base, append(b, '\n')); err != nil {
+				return err
+			}
+			result.ResidueRemoved = true
 			return nil
 		}
 		if !cfg.Ready() {
@@ -379,6 +431,9 @@ func loadConfigFromRoot(root *os.Root, base string) (*Config, error) {
 	pathInfo, err := root.Lstat(base)
 	if err != nil || pathInfo.Mode()&os.ModeSymlink != 0 || !os.SameFile(pathInfo, info) {
 		return nil, errors.New("config path changed during validation")
+	}
+	if err := restrictConfigFile(file); err != nil {
+		return nil, err
 	}
 	var cfg Config
 	decoder := json.NewDecoder(file)

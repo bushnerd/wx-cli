@@ -3,6 +3,8 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -57,5 +59,41 @@ func TestKeychainMaintenanceToolsDescribeLocalWrites(t *testing.T) {
 	}
 	if name, ok := callableToolNameForTarget("keychain authorize"); !ok || name != "keychain_authorize" {
 		t.Fatal("authorize command schema missing")
+	}
+}
+
+func TestKeychainMigrationBackupCleanupRemovesOnlyRegularBackups(t *testing.T) {
+	state := t.TempDir()
+	t.Setenv("WECHAT_CLI_STATE_DIR", state)
+	dir := filepath.Join(state, "keychain-migration")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "outside-config.json")
+	for _, path := range []string{filepath.Join(dir, "20260911-151704-config.json"), filepath.Join(dir, "20260911-152253-config.json"), filepath.Join(dir, "notes.txt"), outside} {
+		if err := os.WriteFile(path, []byte(`{"keys":{"salt":"secret"}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "linked-config.json")); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(keychainMigrationBackups()); got != 2 {
+		t.Fatalf("backups = %d, want 2 regular backup files", got)
+	}
+	removed, err := removeKeychainMigrationBackups()
+	if err != nil || removed != 2 {
+		t.Fatalf("removed=%d err=%v", removed, err)
+	}
+	if len(keychainMigrationBackups()) != 0 {
+		t.Fatal("backup files remain")
+	}
+	for _, keep := range []string{filepath.Join(dir, "notes.txt"), outside} {
+		if _, err := os.Stat(keep); err != nil {
+			t.Fatalf("cleanup touched %s: %v", keep, err)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(dir, "linked-config.json")); err != nil {
+		t.Fatal("cleanup followed or removed a symlink")
 	}
 }

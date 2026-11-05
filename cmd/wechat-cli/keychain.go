@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/r266-tech/wx-cli/v2/internal/config"
@@ -32,6 +34,13 @@ func (s *server) toolKeychainStatus(a map[string]any) (any, error) {
 		"loaded":           loaded,
 		"config_path":      configPathSafe(),
 		"migration_needed": store == "config_legacy" && available,
+	}
+	if backups := keychainMigrationBackups(); len(backups) > 0 {
+		data["plaintext_backups"] = len(backups)
+		if loaded {
+			data["next_action"] = "Plaintext key backups from an earlier migration remain; run keychain migrate to remove them now that Keychain access is verified."
+			data["suggested_commands"] = []string{appName + " keychain migrate", appName + " keychain status"}
+		}
 	}
 	if loadErr != nil {
 		code := keychainDiagnosticCode(loadErr)
@@ -98,16 +107,73 @@ func (s *server) toolKeychainMigrate(a map[string]any) (any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("keychain migration failed: %w", err)
 	}
-	if !result.Migrated {
-		return map[string]any{"status": "already_migrated", "store": "keychain"}, nil
+	// Reaching here means the Keychain record was written and read back
+	// identically (or was already loaded), so the pre-migration plaintext
+	// copies are no longer a rollback path, only exposed secrets.
+	removed, cleanupErr := removeKeychainMigrationBackups()
+	data := map[string]any{
+		"status":                    "already_migrated",
+		"store":                     "keychain",
+		"plaintext_backups_removed": removed,
 	}
-	return map[string]any{
-		"status":        "migrated",
-		"store":         "keychain",
-		"backup":        backupPath,
-		"key_count":     result.KeyCount,
-		"key_reference": result.Reference,
-	}, nil
+	if result.ResidueRemoved {
+		data["plaintext_config_residue_removed"] = true
+	}
+	if result.Migrated {
+		data["status"] = "migrated"
+		data["key_count"] = result.KeyCount
+		data["key_reference"] = result.Reference
+	}
+	if cleanupErr != nil {
+		data["warnings"] = []string{"plaintext_backup_cleanup_failed"}
+		data["next_action"] = "Remove the remaining files under " + keychainMigrationDir() + " manually; they contain database keys."
+	}
+	return data, nil
+}
+
+func keychainMigrationDir() string {
+	stateDir, err := appStateDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(stateDir, "keychain-migration")
+}
+
+// keychainMigrationBackups lists regular backup files only; symlinks and
+// anything else in the directory are left alone.
+func keychainMigrationBackups() []string {
+	dir := keychainMigrationDir()
+	if dir == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, entry := range entries {
+		if !entry.Type().IsRegular() || !strings.HasSuffix(entry.Name(), "-config.json") {
+			continue
+		}
+		out = append(out, filepath.Join(dir, entry.Name()))
+	}
+	return out
+}
+
+func removeKeychainMigrationBackups() (int, error) {
+	removed := 0
+	var firstErr error
+	for _, path := range keychainMigrationBackups() {
+		if err := os.Remove(path); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		removed++
+	}
+	_ = os.Remove(keychainMigrationDir()) // only succeeds when empty
+	return removed, firstErr
 }
 
 func configPathSafe() string {

@@ -327,3 +327,24 @@ func TestWithXWeChatFilesBase(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadRestrictsOverlyPermissiveConfig(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permissions")
+	}
+	p := filepath.Join(t.TempDir(), "config.json")
+	t.Setenv("WECHAT_CLI_CONFIG", p)
+	if err := os.WriteFile(p, []byte(`{"schema_version":2,"keys":{"salt":"synthetic"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(p, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(p)
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("config mode after load = %v (%v), want 0600", info.Mode().Perm(), err)
+	}
+}
