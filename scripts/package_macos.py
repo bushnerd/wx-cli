@@ -34,7 +34,6 @@ def main():
     mode=os.environ.get('WECHAT_CLI_SIGNING_MODE','adhoc')
     if mode not in ('adhoc','developer_id'):raise ValueError('unknown signing mode')
     identity='-' if mode=='adhoc' else os.environ['WECHAT_CLI_SIGNING_IDENTITY']
-    if not a.candidate and mode!='developer_id':raise ValueError('stable requires Developer ID; use --candidate for local rehearsal')
     out=ROOT/'dist';out.mkdir(exist_ok=True)
     name=f'wechat-cli-v{a.version}-darwin-arm64';archive=out/(name+'.zip')
     if archive.exists():raise ValueError('version archive already exists; refusing overwrite')

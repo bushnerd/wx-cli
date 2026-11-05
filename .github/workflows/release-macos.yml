@@ -34,20 +34,30 @@ jobs:
           export WECHAT_CLI_WCDB_LIB="$PWD/lib/libWCDB.dylib"
           go test ./...
           go test -race ./...
-      - name: Build candidate
+      - name: Build package
         id: identity
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
           version=$(go run ./cmd/wechat-cli --version | python3 -c 'import json,sys;print(json.load(sys.stdin)["data"]["version"])')
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          scripts/package.sh "$version" --candidate
+          # A pushed tag vX.Y.Z matching appVersion builds the stable package;
+          # everything else (manual runs, prerelease tags) is a candidate.
+          if [[ "$REF_TYPE" == "tag" && "$REF_NAME" == "v$version" && "$version" != *-* ]]; then
+            scripts/package.sh "$version"
+          else
+            scripts/package.sh "$version" --candidate
+          fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: macos-candidate
+          name: macos-package
           path: dist/wechat-cli-v*-darwin-arm64.zip*
           if-no-files-found: error
   draft:
     needs: package
-    # No personal access token fallback. An absent App blocks publication only.
+    # Optional automation. Without the App the maintainer publishes the
+    # downloaded artifact with scripts/publish-release.py and their gh login.
     if: vars.WECHAT_CLI_RELEASE_APP_ID != ''
     environment: release
     runs-on: ubuntu-latest
@@ -55,7 +65,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: macos-candidate
+          name: macos-package
           path: assets
       - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
         id: app

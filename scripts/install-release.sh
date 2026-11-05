@@ -311,7 +311,9 @@ def verify_and_extract(archive, destination, expected_version, allow_prerelease=
         if d.get('version')!=expected_version or d.get('platform_arch')!='darwin-arm64':raise ValueError('release version/platform mismatch')
         if not re.fullmatch('[0-9a-f]{40}',d.get('commit','')):raise ValueError('invalid source commit')
         preview = allow_prerelease in (True, '1', 'true')
-        stable = d.get('channel')=='stable' and d.get('signing_mode')=='developer_id' and d.get('notarization_status')=='accepted'
+        signed = ((d.get('signing_mode')=='adhoc' and d.get('notarization_status')=='not_configured')
+                  or (d.get('signing_mode')=='developer_id' and d.get('notarization_status')=='accepted'))
+        stable = d.get('channel')=='stable' and '-' not in expected_version and signed
         candidate = (preview and re.fullmatch(r'\d+\.\d+\.\d+-[0-9A-Za-z.-]+', expected_version)
                      and d.get('channel')=='candidate' and d.get('signing_mode') in ('adhoc','developer_id')
                      and d.get('notarization_status') in ('not_configured','accepted'))

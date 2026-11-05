@@ -31,37 +31,37 @@ WCDB, SQLCipher and wxkey licenses. Go dependencies remain checksum-pinned by go
 
 CI validates macOS native Keychain builds, Windows compatibility, installer
 syntax, privacy scanning and release safety tests. Third-party Actions use commit
-SHAs. Fork pull requests receive no release credentials. Candidate packaging runs
-on a hosted arm64 Mac, not the Mac holding private WeChat data.
+SHAs. Fork pull requests receive no release credentials. Packages are built on a
+hosted arm64 Mac, never on the Mac holding private WeChat data.
 
-Create a private GitHub App `wx-cli-release-publisher`, webhook disabled, no user
-permissions or events, only repository Contents read/write plus implicit Metadata
-read. Install it for **only** `wechat-cli-releases`. Configure source repository
-variable `WECHAT_CLI_RELEASE_APP_ID` and secret `WECHAT_CLI_RELEASE_APP_PRIVATE_KEY`.
-Registering/installing the App requires GitHub account verification. The workflow
-mints a short-lived installation token scoped to that single repository; there is
-no personal token fallback. Place the credentials behind the `release` environment.
-
-`release-macos.yml` always builds a candidate. Once App credentials are available
-it uploads a draft and downloads every uploaded asset to compare exact bytes.
-`promote-release.yml` verifies the draft again and requires a receipt bound to its
-zip SHA256, version and source commit. Receipt checks must all be passed. Only then
-can a draft become public/latest. Existing release assets are never clobbered.
+`release-macos.yml` builds a stable package when a pushed tag `vX.Y.Z` equals
+`appVersion`; every other run builds a candidate. The maintainer downloads the
+`macos-package` artifact, runs acceptance against those exact bytes, then runs
+`scripts/publish-release.py --directory DIR --version X.Y.Z` with their own `gh`
+login: it uploads a draft to `r266-tech/wechat-cli-releases`, downloads every
+asset back and compares exact bytes. `--promote` re-verifies the draft, the
+receipt and the source tag before making it public/latest. Existing release
+assets are never clobbered. An optional GitHub App (`WECHAT_CLI_RELEASE_APP_ID`
+plus `WECHAT_CLI_RELEASE_APP_PRIVATE_KEY` in the `release` environment) lets the
+workflow upload the draft itself; it is automation, not a requirement.
 
 ## Signing and stable gate
 
-A local candidate uses ad-hoc signatures explicitly marked as such. To build a
-stable package set `WECHAT_CLI_SIGNING_MODE=developer_id`,
-`WECHAT_CLI_SIGNING_IDENTITY` to a valid Developer ID identity and
-`WECHAT_CLI_NOTARY_PROFILE` to an existing notarytool Keychain profile. The stable
-package path requires a clean matching source tag, valid signatures and Accepted
-notarization. Certificates/private keys and notarization credentials never enter
-source or receipts. Installers preserve valid signatures instead of replacing
-Developer ID signatures with ad-hoc signatures.
+Every stable release so far, v1.x included, is ad-hoc signed and not notarized.
+The `curl | zsh` and `wechat-cli update` paths do not set the quarantine
+attribute, so Gatekeeper does not evaluate them; integrity comes from HTTPS-only
+GitHub downloads, the `.sha256` sidecar and the per-file manifest hashes.
+A stable manifest therefore needs consistent signing: `adhoc` with notarization
+`not_configured`, or `developer_id` with notarization `accepted`. Developer ID
+(`WECHAT_CLI_SIGNING_MODE=developer_id`, `WECHAT_CLI_SIGNING_IDENTITY`,
+`WECHAT_CLI_NOTARY_PROFILE`) remains supported and is an upgrade, not a gate.
+Its practical gain is a stable code identity: each new ad-hoc build must be
+re-authorized once for Keychain access (see below).
 
-No valid identity, no accepted notarization, a partial archive, missing receipt,
-unknown metadata, bad checksum, wrong commit, wrong architecture or incomplete
-asset set blocks promotion. Ad-hoc candidates do not satisfy the stable gate.
+A stable package requires a clean source tag matching `appVersion`, a version
+without a prerelease suffix, a passing acceptance receipt for those exact bytes,
+and a complete, checksum-verified asset set. Unknown metadata, a bad checksum,
+wrong commit or architecture, or an incomplete asset set blocks promotion.
 
 ## Local acceptance and rollback
 
@@ -78,7 +78,10 @@ Install/update/rollback/uninstall rehearsals must use a dedicated HOME and manag
 install/bin/log directories; never purge the user's actual config, Keychain or
 state to simulate a fresh machine. A same-host isolated installation is not proof
 of a truly new Mac: a separate Mac/VM acceptance remains a separate receipt check.
-Do not mark skipped or blocked checks passed. Preserve the current default release
+Do not mark skipped or blocked checks passed. `clean_machine` and
+`release_endpoint_install` cannot be produced before publication on one Mac;
+they are recorded as `not_run`, do not block promotion, and are checked right
+after release (installing from the public endpoint into an isolated HOME). Preserve the current default release
 and user's working installation until the corrected signed release is accepted.
 Component updates stage all new files before replacement and restore previous
 components if replacement fails. If the filesystem also prevents restoration,
