@@ -232,3 +232,15 @@ func TestAssistantSessionFilterAndCursorHelp(t *testing.T) {
 		t.Fatal("timeline help does not use stable paging")
 	}
 }
+
+func TestUsableStaleMetadataCacheKeepsRuntimeReady(t *testing.T) {
+	s, _ := liveSessionFixture(t)
+	status := s.readOSStatus(false)
+	cache, _ := status["metadata_cache"].(map[string]any)
+	if cache["stale"] != true || cache["refresh"] != "automatic" {
+		t.Fatalf("fixture cache not reported as usable-stale: %#v", cache)
+	}
+	if status["readiness"] != "ready" || cache["degraded"] != nil || status["degraded_by"] != nil {
+		t.Fatalf("usable stale metadata degraded a live-readable runtime: %#v", status)
+	}
+}

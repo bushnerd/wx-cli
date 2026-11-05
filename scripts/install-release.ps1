@@ -34,16 +34,15 @@ function Write-Step([string]$Text) {
 }
 
 function Get-RepoSlug([string]$RepoValue) {
-  $r = $RepoValue -replace '^https?://github.com/', ''
+  # Only github.com over HTTPS: the zip and its .sha256 share a source, so a
+  # plaintext or third-party URL would let one party replace both.
+  $r = $RepoValue -replace '^https://github.com/', ''
   $r = $r -replace '\.git$', ''
   return $r.TrimEnd('/')
 }
 
 function Get-RepoUrl([string]$RepoValue) {
-  if ($RepoValue -match '^https?://') {
-    return ($RepoValue -replace '\.git$', '').TrimEnd('/')
-  }
-  return "https://github.com/$($RepoValue -replace '\.git$', '')".TrimEnd('/')
+  return "https://github.com/$(Get-RepoSlug $RepoValue)"
 }
 
 function Get-AssetUrl([string]$Base, [string]$TagValue, [string]$AssetName) {

@@ -136,3 +136,21 @@ func TestReadOSExplainsSessionObservationBoundary(t *testing.T) {
 	}
 	t.Fatal("tail entrypoint not found")
 }
+
+func TestCachePathsNeverDeriveFromAnEmptyAccount(t *testing.T) {
+	t.Setenv("WECHAT_CLI_STATE_DIR", t.TempDir())
+	if _, err := cachePathsFor(&config.Config{}); err == nil {
+		t.Fatal("cache path derived from an unconfigured account")
+	}
+	if id := cacheAccountID(&config.Config{Wxid: "wxid_a/../b"}); id == "" || strings.ContainsAny(id, "/\\") {
+		t.Fatalf("unsafe cache id %q", id)
+	}
+	if a, b := cacheAccountID(&config.Config{DBRoot: "/x"}), cacheAccountID(&config.Config{DBRoot: "/y"}); a == "" || a == b {
+		t.Fatalf("db-root cache ids collide or are empty: %q %q", a, b)
+	}
+	s := &server{cfg: &config.Config{Wxid: "wxid_doctor"}}
+	paths, _ := s.readOSDoctor()["paths"].(map[string]any)
+	if root, _ := paths["cache_root"].(string); !strings.HasSuffix(root, "wxid_doctor") {
+		t.Fatalf("doctor cache_root = %q, want the configured account", root)
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -85,5 +86,52 @@ func TestStrictReadOnlyBlocksUpdaterBeforeDownload(t *testing.T) {
 	t.Setenv("WECHAT_CLI_STRICT_READ_ONLY", "1")
 	if _, err := runReleaseUpdate(updateOptions{DryRun: true}); err == nil {
 		t.Fatal("strict read-only updater was allowed to download files")
+	}
+}
+
+func TestUpdatePinsLatestAndRefusesDowngrade(t *testing.T) {
+	orig := fetchLatestReleaseTag
+	defer func() { fetchLatestReleaseTag = orig }()
+	fetchLatestReleaseTag = func(string) (string, error) { return "v1.6.25", nil }
+
+	opts := updateOptions{Repo: "r266-tech/wechat-cli-releases"}
+	if err := pinUpdateTarget(&opts); err == nil || !strings.Contains(err.Error(), "update_would_downgrade") {
+		t.Fatalf("latest v1.6.25 over %s was not refused: %v", appVersion, err)
+	}
+	opts = updateOptions{Repo: "r266-tech/wechat-cli-releases", AllowDowngrade: true}
+	if err := pinUpdateTarget(&opts); err != nil || opts.Tag != "v1.6.25" {
+		t.Fatalf("explicit downgrade not pinned: tag=%q err=%v", opts.Tag, err)
+	}
+	if !slices.Contains(releaseInstallerArgs(opts), "v1.6.25") {
+		t.Fatal("pinned tag not forwarded to the installer")
+	}
+
+	fetchLatestReleaseTag = func(string) (string, error) { return "v99.0.0", nil }
+	opts = updateOptions{Repo: "r266-tech/wechat-cli-releases", Tag: "latest"}
+	if err := pinUpdateTarget(&opts); err != nil || opts.Tag != "v99.0.0" {
+		t.Fatalf("newer latest not pinned: tag=%q err=%v", opts.Tag, err)
+	}
+
+	fetchLatestReleaseTag = func(string) (string, error) { return "v1.0.0/../x", nil }
+	if err := pinUpdateTarget(&updateOptions{Repo: "r266-tech/x"}); err == nil {
+		t.Fatal("accepted an invalid latest tag")
+	}
+}
+
+func TestCompareVersions(t *testing.T) {
+	for _, c := range []struct {
+		a, b string
+		want int
+	}{
+		{"1.6.25", "2.0.1-rc.6", -1},
+		{"2.0.1-rc.6", "2.0.1", -1},
+		{"2.0.1-rc.10", "2.0.1-rc.9", 1},
+		{"2.0.1", "2.0.1", 0},
+		{"2.1.0", "2.0.9", 1},
+		{"2.0.1-rc.6", "2.0.1-rc.6", 0},
+	} {
+		if got := compareVersions(c.a, c.b); got != c.want {
+			t.Fatalf("compareVersions(%s, %s) = %d, want %d", c.a, c.b, got, c.want)
+		}
 	}
 }

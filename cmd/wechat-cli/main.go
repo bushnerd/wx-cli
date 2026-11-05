@@ -4409,14 +4409,12 @@ func (s *server) mediaDecodeCacheDir() (string, error) {
 		return "", err
 	}
 	id := "default"
-	if s != nil && s.cfg != nil {
-		id = s.cfg.Wxid
-		if id == "" && s.cfg.DBRoot != "" {
-			sum := md5.Sum([]byte(s.cfg.DBRoot))
-			id = "root-" + hex.EncodeToString(sum[:8])
+	if s != nil {
+		if accountID := cacheAccountID(s.cfg); accountID != "" {
+			id = accountID
 		}
 	}
-	return filepath.Join(stateDir, "media-cache", safeCacheID(id)), nil
+	return filepath.Join(stateDir, "media-cache", id), nil
 }
 
 func imageExtForData(data []byte) string {

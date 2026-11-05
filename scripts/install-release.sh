@@ -60,23 +60,18 @@ have_cmd() {
 }
 
 repo_slug() {
+  # Only github.com over HTTPS. Anything else (http://, other hosts) keeps its
+  # scheme and fails the owner/name check, because the zip and its .sha256 come
+  # from the same place and a checksum cannot protect a plaintext download.
   local repo="$1"
   repo="${repo#https://github.com/}"
-  repo="${repo#http://github.com/}"
   repo="${repo%.git}"
   repo="${repo%/}"
   print -r -- "$repo"
 }
 
 repo_url() {
-  local repo="$1"
-  if [[ "$repo" == http://* || "$repo" == https://* ]]; then
-    repo="${repo%.git}"
-    print -r -- "${repo%/}"
-  else
-    repo="${repo%.git}"
-    print -r -- "https://github.com/${repo%/}"
-  fi
+  print -r -- "https://github.com/$(repo_slug "$1")"
 }
 
 download_file() {

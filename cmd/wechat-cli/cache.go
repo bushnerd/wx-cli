@@ -83,18 +83,34 @@ func cachePathsFor(cfg *config.Config) (cachePaths, error) {
 	if err != nil {
 		return cachePaths{}, err
 	}
-	id := cfg.Wxid
+	id := cacheAccountID(cfg)
 	if id == "" {
-		sum := md5.Sum([]byte(cfg.DBRoot))
-		id = "root-" + hex.EncodeToString(sum[:8])
+		return cachePaths{}, errors.New("no WeChat account configured; run first key setup")
 	}
-	id = safeCacheID(id)
 	root := filepath.Join(stateDir, "cache", id)
 	return cachePaths{
 		RootDir:   root,
 		RawDir:    filepath.Join(root, "raw"),
 		IndexPath: filepath.Join(root, "index.sqlite"),
 	}, nil
+}
+
+// cacheAccountID names per-account local state (metadata cache, decoded
+// media). It is empty when no account is configured, so callers never derive
+// a path from an empty config.
+func cacheAccountID(cfg *config.Config) string {
+	if cfg == nil {
+		return ""
+	}
+	id := cfg.Wxid
+	if id == "" && cfg.DBRoot != "" {
+		sum := md5.Sum([]byte(cfg.DBRoot))
+		id = "root-" + hex.EncodeToString(sum[:8])
+	}
+	if id == "" {
+		return ""
+	}
+	return safeCacheID(id)
 }
 
 func (s *server) cachePaths() (cachePaths, error) {

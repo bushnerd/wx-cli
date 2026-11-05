@@ -66,6 +66,22 @@ main --repo fixture/release --tag v2.0.1-rc.5 --allow-prerelease --json --dry-ru
             self.assertEqual(run.returncode,0,run.stderr)
             self.assertEqual(json.loads(run.stdout),{'ok':True,'status':'dry_run'})
 
+    def test_bootstrap_rejects_plaintext_or_foreign_repository_before_download(self):
+        if not shutil.which('zsh'):
+            self.skipTest('zsh unavailable')
+        script=Path(__file__).with_name('install-release.sh').resolve()
+        for repo in ('http://github.com/r266-tech/wx-cli','https://example.com/r266-tech/wx-cli'):
+            with self.subTest(repo=repo):
+                run=subprocess.run(['zsh','-c', '''
+source "$1"
+uname() { if [[ "$1" == '-s' ]]; then print Darwin; else print arm64; fi }
+download_file() { print -u2 "DOWNLOADED $1"; return 1 }
+fetch_text() { print -u2 "DOWNLOADED $1"; return 1 }
+main --repo "$2" --tag v2.0.1 --json --dry-run
+''','fixture',str(script),repo],text=True,capture_output=True)
+                self.assertNotEqual(run.returncode,0)
+                self.assertNotIn('DOWNLOADED',run.stderr+run.stdout)
+
     def test_noncanonical_and_case_aliases_rejected_before_writes(self):
         for name in ('pkg/./install.sh', 'pkg//install.sh', 'pkg/INSTALL.SH', '.'):
             with self.subTest(name=name),tempfile.TemporaryDirectory() as d:
