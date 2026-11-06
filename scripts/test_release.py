@@ -43,6 +43,14 @@ class PreviewBootstrap(unittest.TestCase):
                 p=self.package(d,channel='stable',version='2.0.1',signing=signing)
                 with self.assertRaises(ValueError):verify_and_extract(p,Path(d)/'out','2.0.1')
 
+    def test_only_developer_id_builds_are_notarized(self):
+        # v2.0.1 failed packaging because the ad-hoc stable path still required
+        # a notary profile; the build must follow the manifest signing rule.
+        spec=importlib.util.spec_from_file_location('package_macos',Path(__file__).parent/'package_macos.py')
+        mod=importlib.util.module_from_spec(spec);spec.loader.exec_module(mod)
+        self.assertFalse(mod.needs_notarization('adhoc'))
+        self.assertTrue(mod.needs_notarization('developer_id'))
+
     def test_preview_cannot_skip_hash_or_identity(self):
         for kw,version in (({'bad_hash':True},'2.0.1-rc.5'),({},'2.0.1-rc.6'),({'channel':'stable'},'2.0.1-rc.5'),({'version':'2.0.1'},'2.0.1')):
             with self.subTest(kw=kw),tempfile.TemporaryDirectory() as d:

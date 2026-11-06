@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import time
@@ -116,16 +117,34 @@ def main():
         if sha256(f)!=first:raise ValueError('digest overwritten')
         return validate_digest_windows(json.loads(f.read_text()), json.loads(Path(again['source_json']).read_text()))
     record('digest',digest)
+    archive_warnings=[]
     def archive():
-        data=call('archive_create',{},True)
-        if data['failed'] or not data['succeeded']:raise ValueError('partial archive')
-        result=call('archive_validate',{'input':data['archive_root']})
-        if not result['valid']:raise ValueError('archive invalid')
-        return data['succeeded']
+        # The archive is a plaintext copy of the user's chats: write it to a
+        # private temp dir and remove it once validated.
+        parent=Path(tempfile.mkdtemp(prefix='wx-acceptance-archive-'))
+        try:
+            data=call('archive_create',{'output':str(parent/'snapshot'),'confirm_external_output':True},True)
+            if not data['succeeded']:raise ValueError('empty archive')
+            if data['failed']:
+                # Only databases that status already reports as keyless may fail;
+                # that is the environment's key coverage, not an archive defect.
+                records=json.loads(Path(data['manifest']).read_text())['records']
+                failed={r['path'] for r in records if r.get('status')!='ok'}
+                status=call('read_os',{'mode':'status'})['status']
+                missing=set((status.get('account') or {}).get('db_keys_missing') or [])
+                if not failed or not failed<=missing:raise ValueError('archive failed beyond missing keys')
+                archive_warnings.append('archive_db_keys_missing')
+            result=call('archive_validate',{'input':data['archive_root']})
+            if not result['valid']:raise ValueError('archive invalid')
+            return data['succeeded']
+        finally:
+            shutil.rmtree(parent,ignore_errors=True)
     if a.skip_archive:
         checks['archive']={'status':'not_run','warning_codes':['archive_explicitly_skipped']}
     else:
         record('archive',archive)
+        if archive_warnings and checks['archive']['status']=='passed':
+            checks['archive']['warning_codes']=archive_warnings
     return finish(a,version,checks)
 
 def finish(a,version,checks):
