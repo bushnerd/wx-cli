@@ -68,3 +68,10 @@ func TestDBFilesMissingKeysNamesUnreadableDatabases(t *testing.T) {
 		t.Fatalf("missing keys = %#v, want the factory snapshot listed too", got)
 	}
 }
+
+func TestSnapshotDBsDoNotCountAsLiveMissingKeys(t *testing.T) {
+	live, snapshots := splitSnapshotDBs([]string{"message/message_resource.db", "message/message_0.db.factory/2026-05-19/message_0.db"})
+	if len(live) != 1 || live[0] != "message/message_resource.db" || len(snapshots) != 1 {
+		t.Fatalf("live=%#v snapshots=%#v", live, snapshots)
+	}
+}

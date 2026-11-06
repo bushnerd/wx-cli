@@ -36,7 +36,7 @@ Update:
 
 Runtime:
 - Sessions and unread counts come from the live session DB, not metadata cache. `status.live_read_ok` requires an actual database query.
-- Partial key coverage is reported, not hidden: `status.account.db_keys_missing` lists databases without a cached key and readiness becomes `degraded`. Without `message/message_resource.db`, image and video paths still resolve from message rows (`media_index_unavailable` warning); file attachments may be missing until `wxkey bootstrap` captures the key.
+- Partial key coverage is reported, not hidden: `status.account.db_keys_missing` lists live databases without a cached key and readiness becomes `degraded`; WeChat's internal `*.factory` backup copies are listed separately in `snapshot_keys_missing` and do not degrade readiness. Without `message/message_resource.db`, image and video paths still resolve from message rows (`media_index_unavailable` warning); file attachments may be missing until `wxkey bootstrap` captures the key.
 - A failed automatic wxkey run is not retried for 10 minutes across processes, so normal reads stay fast while keys are missing.
 - Binary: `wechat-cli` / `wechat-cli.exe`
 - macOS install dir: `~/.local/share/wechat-cli`

@@ -132,7 +132,8 @@ def main():
                 records=json.loads(Path(data['manifest']).read_text())['records']
                 failed={r['path'] for r in records if r.get('status')!='ok'}
                 status=call('read_os',{'mode':'status'})['status']
-                missing=set((status.get('account') or {}).get('db_keys_missing') or [])
+                account=status.get('account') or {}
+                missing=set(account.get('db_keys_missing') or [])|set(account.get('snapshot_keys_missing') or [])
                 if not failed or not failed<=missing:raise ValueError('archive failed beyond missing keys')
                 archive_warnings.append('archive_db_keys_missing')
             result=call('archive_validate',{'input':data['archive_root']})
