@@ -20,15 +20,7 @@
 
 ### macOS
 
-当前 macOS 预发布版为 **v2.0.1-rc.6**，直接发布在本源码仓库的 Releases。它采用 ad-hoc 签名，尚未经过 Apple 公证。安装或更新此预发布版：
-
-```bash
-curl -fsSL https://github.com/r266-tech/wx-cli/releases/download/v2.0.1-rc.6/install-release.sh | zsh -s -- --repo r266-tech/wx-cli --tag v2.0.1-rc.6 --allow-prerelease
-```
-
-已有此预发布版时，可用 `wechat-cli update --repo r266-tech/wx-cli --tag v2.0.1-rc.6 --allow-prerelease`。预发布安装同样校验 checksum、manifest 和组件哈希；不会被稳定频道自动选中。完整归档仍可能因部分库缺密钥而失败，必须检查 `failed` 和校验结果。
-
-以下是独立 Release 仓库的稳定频道入口：
+稳定版发布在独立的 Release 仓库 `r266-tech/wechat-cli-releases`。它采用 ad-hoc 签名，未经 Apple 公证；安装器会校验 checksum、manifest 和组件哈希。
 
 ```bash
 curl -fsSL https://github.com/r266-tech/wechat-cli-releases/releases/latest/download/install-release.sh | zsh
