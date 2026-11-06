@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   package:
-    runs-on: macos-14
+    runs-on: macos-15
     outputs:
       version: ${{ steps.identity.outputs.version }}
     steps:

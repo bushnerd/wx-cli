@@ -38,7 +38,7 @@ def main():
     name=f'wechat-cli-v{a.version}-darwin-arm64';archive=out/(name+'.zip')
     if archive.exists():raise ValueError('version archive already exists; refusing overwrite')
     stage=Path(tempfile.mkdtemp(prefix='.stage-',dir=out));pkg=stage/name;pkg.mkdir()
-    env=os.environ.copy();env.update(CGO_ENABLED='1',GOOS='darwin',GOARCH='arm64')
+    env=os.environ.copy();env.update(CGO_ENABLED='1',GOOS='darwin',GOARCH='arm64',MACOSX_DEPLOYMENT_TARGET='13.0')
     run(['go','build','-trimpath','-ldflags',f'-s -w -X main.sourceCommit={commit}','-o',str(pkg/'wechat-cli'),'./cmd/wechat-cli'],cwd=ROOT,env=env)
     run(['go','build','-trimpath','-ldflags','-s -w','-o',str(pkg/'wxkey'),'./cmd/wxkey'],cwd=wx,env=env)
     shutil.copy2(lib,pkg/'libWCDB.dylib')
