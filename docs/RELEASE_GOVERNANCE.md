@@ -14,8 +14,9 @@ and user state locations remain compatible. No automatic user-state migration is
 performed by repository migration. Additive JSON fields are version/commit metadata.
 
 The initial public source tag `v2.0.0` identifies the initial import, not an accepted
-binary release. It is not moved. The current corrected candidate uses `v2.0.1-rc.6`;
-formal `v2.0.1` requires all gates. Do not reuse a published source tag or asset name.
+binary release. It is not moved. `v2.0.1-rc.1` through `rc.6` were previews in this
+repository; `v2.0.1` is the first v2 stable release. Do not reuse a published
+source tag or asset name.
 
 ## Build inputs
 

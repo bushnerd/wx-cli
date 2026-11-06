@@ -21,15 +21,9 @@ WeChat 4.x.
 
 Prefer release bootstrap or latest release zip over a source clone.
 
-The current macOS preview is `v2.0.1-rc.6` in `r266-tech/wx-cli`:
-
-```bash
-curl -fsSL https://github.com/r266-tech/wx-cli/releases/download/v2.0.1-rc.6/install-release.sh | zsh -s -- --repo r266-tech/wx-cli --tag v2.0.1-rc.6 --allow-prerelease
-```
-
-This explicit preview uses ad-hoc signing and is not Apple-notarized. Hash and
-manifest verification still apply. Keep previews separate from stable updates.
-For an existing preview use `wechat-cli update --repo r266-tech/wx-cli --tag v2.0.1-rc.6 --allow-prerelease`.
+Stable releases live in `r266-tech/wechat-cli-releases`. They are ad-hoc signed
+and not Apple-notarized; checksum, manifest, and component hash verification
+always apply.
 
 Human-friendly macOS:
 
