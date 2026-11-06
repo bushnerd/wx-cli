@@ -341,7 +341,13 @@ func (s *server) readOSStatus(includeDebug bool) map[string]any {
 	if liveReadOK {
 		// Partial key coverage is common after WeChat updates. Name the
 		// databases that cannot be read instead of reporting full readiness.
-		if missing := dbFilesMissingKeys(cfg); len(missing) > 0 {
+		live, snapshots := splitSnapshotDBs(dbFilesMissingKeys(cfg))
+		if account, _ := status["account"].(map[string]any); account != nil && len(snapshots) > 0 {
+			// WeChat's *.factory directories are old internal backup copies that
+			// no read uses; list them without degrading readiness.
+			account["snapshot_keys_missing"] = snapshots
+		}
+		if missing := live; len(missing) > 0 {
 			account, _ := status["account"].(map[string]any)
 			if account != nil {
 				account["db_keys_missing"] = missing
@@ -372,6 +378,19 @@ func (s *server) readOSStatus(includeDebug bool) map[string]any {
 		status["suggested_commands"] = suggestedCommands
 	}
 	return status
+}
+
+// splitSnapshotDBs separates WeChat's internal *.factory backup copies from
+// the live databases.
+func splitSnapshotDBs(paths []string) (live, snapshots []string) {
+	for _, p := range paths {
+		if strings.Contains(p, ".factory/") {
+			snapshots = append(snapshots, p)
+		} else {
+			live = append(live, p)
+		}
+	}
+	return live, snapshots
 }
 
 // dbFilesMissingKeys lists source databases (the same set archive and cache
