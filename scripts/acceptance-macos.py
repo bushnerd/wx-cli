@@ -125,6 +125,7 @@ def main():
         try:
             data=call('archive_create',{'output':str(parent/'snapshot'),'confirm_external_output':True},True)
             if not data['succeeded']:raise ValueError('empty archive')
+            failed=set()
             if data['failed']:
                 # Only databases that status already reports as keyless may fail;
                 # that is the environment's key coverage, not an archive defect.
@@ -135,7 +136,10 @@ def main():
                 if not failed or not failed<=missing:raise ValueError('archive failed beyond missing keys')
                 archive_warnings.append('archive_db_keys_missing')
             result=call('archive_validate',{'input':data['archive_root']})
-            if not result['valid']:raise ValueError('archive invalid')
+            # validate marks a partial archive invalid; every archived file must
+            # still verify, and the only bad entries may be the tolerated ones.
+            bad={f.get('path') for f in result.get('files') or [] if f.get('status')!='ok'}
+            if not result['valid'] and (not bad or not bad<=failed):raise ValueError('archive invalid')
             return data['succeeded']
         finally:
             shutil.rmtree(parent,ignore_errors=True)
