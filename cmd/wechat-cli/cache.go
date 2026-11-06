@@ -1332,11 +1332,15 @@ func (s *server) toolExportMessages(a map[string]any) (any, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
-	count, err := s.writeLiveExportMessages(a, path, format, view)
+	count, warnings, err := s.writeLiveExportMessages(a, path, format, view)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"path": path, "format": format, "view": view, "count": count, "live": true}, nil
+	out := map[string]any{"path": path, "format": format, "view": view, "count": count, "live": true}
+	if len(warnings) > 0 {
+		out["warnings"] = warnings
+	}
+	return out, nil
 }
 
 func exportMessagesView(a map[string]any) (string, error) {
@@ -1352,15 +1356,16 @@ func exportMessagesView(a map[string]any) (string, error) {
 	}
 }
 
-func (s *server) writeLiveExportMessages(a map[string]any, path, format, view string) (int, error) {
+func (s *server) writeLiveExportMessages(a map[string]any, path, format, view string) (int, []string, error) {
+	var warnings []string
 	switch format {
 	case "jsonl", "markdown", "html":
 	default:
-		return 0, fmt.Errorf("invalid format=%q: jsonl / markdown / html", format)
+		return 0, nil, fmt.Errorf("invalid format=%q: jsonl / markdown / html", format)
 	}
 	f, err := os.CreateTemp(filepath.Dir(path), ".export-*.tmp")
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	defer f.Close()
 	tmp := f.Name()
@@ -1382,7 +1387,7 @@ func (s *server) writeLiveExportMessages(a map[string]any, path, format, view st
 	case "html":
 		_, _ = w.WriteString("<!doctype html><meta charset=\"utf-8\"><title>wechat-cli export</title><body>")
 	default:
-		return 0, fmt.Errorf("invalid format=%q: jsonl / markdown / html", format)
+		return 0, nil, fmt.Errorf("invalid format=%q: jsonl / markdown / html", format)
 	}
 	for written < totalLimit {
 		batchArgs := map[string]any{}
@@ -1398,10 +1403,10 @@ func (s *server) writeLiveExportMessages(a map[string]any, path, format, view st
 		batchArgs["offset"] = baseOffset + written
 		rows, page, err := s.queryLiveMessages(batchArgs, "create_time ASC, local_id ASC")
 		if err != nil {
-			return written, err
+			return written, nil, err
 		}
 		if err := requireCompleteMessageSource(page.Warnings); err != nil {
-			return written, err
+			return written, nil, err
 		}
 		if len(rows) == 0 {
 			break
@@ -1409,8 +1414,9 @@ func (s *server) writeLiveExportMessages(a map[string]any, path, format, view st
 		var agentRows []map[string]any
 		if view == "agent" {
 			if includeMediaPathsForMessages(batchArgs) {
+				// Text export must not fail because media paths are partial.
 				if err := s.enrichMessageMediaResources(rows); err != nil {
-					return written, err
+					warnings = appendUniqueStrings(warnings, "media_enrichment_failed: "+err.Error())
 				}
 			}
 			agentRows = agentMessages(rows, includeDebugOutput(batchArgs))
@@ -1428,13 +1434,13 @@ func (s *server) writeLiveExportMessages(a map[string]any, path, format, view st
 				}
 				j, err := json.Marshal(payload)
 				if err != nil {
-					return written, err
+					return written, nil, err
 				}
 				if _, err := w.Write(j); err != nil {
-					return written, err
+					return written, nil, err
 				}
 				if err := w.WriteByte('\n'); err != nil {
-					return written, err
+					return written, nil, err
 				}
 			case "markdown":
 				text := renderMessageMarkdown(r)
@@ -1442,7 +1448,7 @@ func (s *server) writeLiveExportMessages(a map[string]any, path, format, view st
 					text = renderAgentMessageMarkdown(agentRow)
 				}
 				if _, err := w.WriteString(text); err != nil {
-					return written, err
+					return written, nil, err
 				}
 			case "html":
 				text := renderMessageHTMLSection(r)
@@ -1450,7 +1456,7 @@ func (s *server) writeLiveExportMessages(a map[string]any, path, format, view st
 					text = renderAgentMessageHTMLSection(agentRow)
 				}
 				if _, err := w.WriteString(text); err != nil {
-					return written, err
+					return written, nil, err
 				}
 			}
 		}
@@ -1461,22 +1467,22 @@ func (s *server) writeLiveExportMessages(a map[string]any, path, format, view st
 	}
 	if format == "html" {
 		if _, err := w.WriteString("</body>"); err != nil {
-			return written, err
+			return written, nil, err
 		}
 	}
 	if err := w.Flush(); err != nil {
-		return written, err
+		return written, nil, err
 	}
 	if err := f.Sync(); err != nil {
-		return written, err
+		return written, nil, err
 	}
 	if err := f.Close(); err != nil {
-		return written, err
+		return written, nil, err
 	}
 	if err := safefile.Replace(tmp, path); err != nil {
-		return written, err
+		return written, nil, err
 	}
-	return written, nil
+	return written, warnings, nil
 }
 
 func requireCompleteMessageSource(warnings []string) error {

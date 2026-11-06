@@ -21,7 +21,7 @@ func TestFailedExportPreservesExistingFile(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Setenv("WECHAT_CLI_STRICT_READ_ONLY", "1")
-			_, err := (&server{}).writeLiveExportMessages(map[string]any{"chat": "missing fixture"}, path, format, "agent")
+			_, _, err := (&server{}).writeLiveExportMessages(map[string]any{"chat": "missing fixture"}, path, format, "agent")
 			if err == nil {
 				t.Fatal("expected invalid format or unavailable source error")
 			}

@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -338,6 +339,25 @@ func (s *server) readOSStatus(includeDebug bool) map[string]any {
 	}
 	status["live_read_ok"] = liveReadOK
 	status["capabilities"] = readOSCapabilities(liveReadOK, wcdbAvailable, cacheIndexExists)
+	if liveReadOK {
+		// Partial key coverage is common after WeChat updates. Name the
+		// databases that cannot be read instead of reporting full readiness.
+		if missing := dbFilesMissingKeys(cfg); len(missing) > 0 {
+			account, _ := status["account"].(map[string]any)
+			if account != nil {
+				account["db_keys_missing"] = missing
+			}
+			degradedBy = appendUniqueStrings(degradedBy, "db_keys_missing")
+			warnings = appendUniqueStrings(warnings, "db_keys_missing")
+			if readiness == "ready" {
+				readiness = "degraded"
+			}
+			if blockedBy == "" {
+				nextAction = "Some databases have no cached key (media index, file attachments and similar reads fail or fall back). Run wxkey bootstrap to capture them."
+				suggestedCommands = append(suggestedCommands, readOSBootstrapCommand())
+			}
+		}
+	}
 	status["readiness"] = readiness
 	if len(degradedBy) > 0 {
 		status["degraded_by"] = degradedBy
@@ -347,10 +367,43 @@ func (s *server) readOSStatus(includeDebug bool) map[string]any {
 	}
 	if blockedBy != "" {
 		status["blocked_by"] = blockedBy
+	}
+	if nextAction != "" {
 		status["next_action"] = nextAction
 		status["suggested_commands"] = suggestedCommands
 	}
 	return status
+}
+
+// dbFilesMissingKeys lists db_storage databases (relative paths) whose salt
+// has no cached key. WeChat's *.factory snapshot directories are skipped.
+func dbFilesMissingKeys(cfg *config.Config) []string {
+	if cfg == nil || cfg.DBRoot == "" {
+		return nil
+	}
+	root := filepath.Join(cfg.DBRoot, "db_storage")
+	var missing []string
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if strings.HasSuffix(d.Name(), ".factory") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(d.Name(), ".db") {
+			return nil
+		}
+		if ok, err := wcdb.HasKeyFor(path, cfg.Keys); err == nil && !ok {
+			if rel, err := filepath.Rel(root, path); err == nil {
+				missing = append(missing, filepath.ToSlash(rel))
+			}
+		}
+		return nil
+	})
+	return missing
 }
 
 func readOSCapabilities(dbReady, wcdbAvailable, cacheIndexExists bool) map[string]bool {

@@ -456,6 +456,17 @@ func sqlString(s string) string {
 
 // readDBSalt reads the first 16 bytes of dbPath — these are the SQLCipher
 // salt and uniquely identify which enc_key opens the file.
+// HasKeyFor reports whether keys holds the enc_key for dbPath's salt,
+// without loading WCDB or opening the database.
+func HasKeyFor(dbPath string, keys map[string]string) (bool, error) {
+	salt, err := readDBSalt(dbPath)
+	if err != nil {
+		return false, err
+	}
+	_, ok := keys[hex.EncodeToString(salt)]
+	return ok, nil
+}
+
 func readDBSalt(dbPath string) ([]byte, error) {
 	f, err := os.Open(dbPath)
 	if err != nil {
