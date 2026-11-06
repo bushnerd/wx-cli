@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,6 +30,7 @@ type updateOptions struct {
 	Asset           string
 	InstallDir      string
 	AllowPrerelease bool
+	AllowDowngrade  bool
 }
 
 func runUpdateCLI(args []string, opts cliOptions) {
@@ -59,6 +61,8 @@ func parseUpdateArgs(args []string) (updateOptions, error) {
 			opts.KeepDownload = true
 		case arg == "--allow-prerelease":
 			opts.AllowPrerelease = true
+		case arg == "--allow-downgrade":
+			opts.AllowDowngrade = true
 		case arg == "--repo":
 			v, err := updateArgValue(args, &i, arg)
 			if err != nil {
@@ -133,6 +137,9 @@ func runReleaseUpdate(opts updateOptions) (map[string]any, error) {
 			return nil, fmt.Errorf("resolve current install directory: %w", err)
 		}
 		opts.InstallDir = installDir
+	}
+	if err := pinUpdateTarget(&opts); err != nil {
+		return nil, err
 	}
 	switch runtime.GOOS {
 	case "darwin":
@@ -486,3 +493,95 @@ try {
   exit 1
 }
 `
+
+// fetchLatestReleaseTag is a variable so tests can avoid the network.
+var fetchLatestReleaseTag = func(repo string) (string, error) {
+	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/"+repo+"/releases/latest", nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", appName+"/"+appVersion)
+	resp, err := (&http.Client{Timeout: 20 * time.Second}).Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("GitHub returned %s", resp.Status)
+	}
+	var body struct {
+		TagName string `json:"tag_name"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil {
+		return "", err
+	}
+	return body.TagName, nil
+}
+
+// pinUpdateTarget resolves "latest" to a concrete tag before anything is
+// downloaded, then refuses to install an older version than the running one.
+// Without this, a v2 preview install silently fell back to the v1 stable line.
+func pinUpdateTarget(opts *updateOptions) error {
+	if opts.Tag == "" || opts.Tag == "latest" {
+		tag, err := fetchLatestReleaseTag(opts.Repo)
+		if err != nil {
+			return fmt.Errorf("resolve latest release of %s: %w", opts.Repo, err)
+		}
+		if !regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$`).MatchString(tag) {
+			return fmt.Errorf("latest release of %s has an invalid tag %q", opts.Repo, tag)
+		}
+		opts.Tag = tag
+	}
+	if !opts.AllowDowngrade && compareVersions(strings.TrimPrefix(opts.Tag, "v"), appVersion) < 0 {
+		return fmt.Errorf("update_would_downgrade: %s %s is older than the installed %s; pass --allow-downgrade to install it anyway", opts.Repo, opts.Tag, appVersion)
+	}
+	return nil
+}
+
+// compareVersions orders semantic versions (MAJOR.MINOR.PATCH[-PRERELEASE]);
+// a prerelease sorts before its release, as in semver 2.0.
+func compareVersions(a, b string) int {
+	coreA, preA, _ := strings.Cut(a, "-")
+	coreB, preB, _ := strings.Cut(b, "-")
+	if c := compareDotted(coreA, coreB); c != 0 {
+		return c
+	}
+	switch {
+	case preA == preB:
+		return 0
+	case preA == "":
+		return 1
+	case preB == "":
+		return -1
+	}
+	return compareDotted(preA, preB)
+}
+
+func compareDotted(a, b string) int {
+	pa, pb := strings.Split(a, "."), strings.Split(b, ".")
+	for i := 0; i < len(pa) || i < len(pb); i++ {
+		if i >= len(pa) {
+			return -1
+		}
+		if i >= len(pb) {
+			return 1
+		}
+		na, errA := strconv.Atoi(pa[i])
+		nb, errB := strconv.Atoi(pb[i])
+		switch {
+		case errA == nil && errB == nil && na != nb:
+			if na < nb {
+				return -1
+			}
+			return 1
+		case errA == nil && errB != nil:
+			return -1
+		case errA != nil && errB == nil:
+			return 1
+		case errA != nil && errB != nil && pa[i] != pb[i]:
+			return strings.Compare(pa[i], pb[i])
+		}
+	}
+	return 0
+}

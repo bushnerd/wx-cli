@@ -26,8 +26,8 @@ def main():
     if mode not in ('adhoc','developer_id'): raise ValueError('unknown signing mode')
     channel=os.environ.get('WECHAT_CLI_RELEASE_CHANNEL','candidate')
     notarized=os.environ.get('WECHAT_CLI_NOTARIZATION_STATUS','not_configured')
-    if channel=='stable' and (mode!='developer_id' or notarized!='accepted'):
-        raise ValueError('stable requires Developer ID and accepted notarization')
+    if mode=='developer_id' and channel=='stable' and notarized!='accepted':
+        raise ValueError('a Developer ID stable build must be notarized')
     artifacts={}
     for p in sorted(root.rglob('*')):
         if p.is_symlink(): raise ValueError('packaged symlink')

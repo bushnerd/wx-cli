@@ -10,7 +10,7 @@ import tempfile
 import time
 import uuid
 from pathlib import Path
-from release_lib import sha256, verify_acceptance_artifact
+from release_lib import receipt_passed, sha256, verify_acceptance_artifact
 
 
 def digest_message_ids(document, require_messages=False):
@@ -131,7 +131,7 @@ def main():
 def finish(a,version,checks):
     for name in ('install','update','rollback','uninstall'):
         checks[name]={'status':'not_run','warning_codes':['isolated_installer_receipt_required']}
-    receipt={'schema_version':1,'passed':all(c['status']=='passed' for c in checks.values()),'version':version['version'],'commit':version['commit'],'artifact_sha256':sha256(a.archive),'platform':'darwin','arch':'arm64','checks':checks}
+    receipt={'schema_version':1,'passed':receipt_passed(checks),'version':version['version'],'commit':version['commit'],'artifact_sha256':sha256(a.archive),'platform':'darwin','arch':'arm64','checks':checks}
     dest=Path.home()/'.wechat-cli'/'diagnostics'/('acceptance-'+uuid.uuid4().hex)
     dest.mkdir(parents=True,mode=0o700);path=dest/'acceptance-receipt.json'
     fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)

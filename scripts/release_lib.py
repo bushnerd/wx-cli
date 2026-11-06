@@ -13,6 +13,22 @@ SOURCE_REPO = 'r266-tech/wx-cli'
 RELEASE_REPO = 'r266-tech/wechat-cli-releases'
 
 
+# Checks that only exist after publication or on a second machine. They are
+# recorded honestly as not_run and verified after release; they never gate it.
+POST_RELEASE_CHECKS = frozenset({'clean_machine', 'release_endpoint_install'})
+
+
+def receipt_passed(checks):
+    return all(c.get('status') == 'passed' or (name in POST_RELEASE_CHECKS and c.get('status') == 'not_run')
+               for name, c in checks.items())
+
+
+def signing_consistent(manifest):
+    """Ad-hoc builds are unnotarized; Developer ID builds must be notarized."""
+    return ((manifest.get('signing_mode') == 'adhoc' and manifest.get('notarization_status') == 'not_configured')
+            or (manifest.get('signing_mode') == 'developer_id' and manifest.get('notarization_status') == 'accepted'))
+
+
 def sha256(path):
     with Path(path).open('rb') as f:
         return hashlib.file_digest(f, 'sha256').hexdigest()

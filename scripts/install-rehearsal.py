@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
-from release_lib import sha256, verify_acceptance_artifact
+from release_lib import receipt_passed, sha256, verify_acceptance_artifact
 
 ap=argparse.ArgumentParser();ap.add_argument('--package',required=True);ap.add_argument('--rollback-package',required=True);ap.add_argument('--receipt',required=True)
 ap.add_argument('--archive',help='Exact candidate ZIP; defaults to PACKAGE.zip beside the package directory.')
@@ -63,7 +63,7 @@ check('install',first);check('update',update);check('rollback',rollback);check('
 # A local installer rehearsal is not a hosted endpoint update or a clean machine.
 receipt['checks']['clean_machine']={'status':'not_run','warning_codes':['separate_mac_required']}
 receipt['checks']['release_endpoint_install']={'status':'not_run','warning_codes':['signed_release_required']}
-receipt['passed']=all(c['status']=='passed' for c in receipt['checks'].values())
+receipt['passed']=receipt_passed(receipt['checks'])
 path=Path(a.receipt);tmp=path.with_suffix('.tmp')
 fd=os.open(tmp,os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
 with os.fdopen(fd,'w') as f:json.dump(receipt,f,indent=2)

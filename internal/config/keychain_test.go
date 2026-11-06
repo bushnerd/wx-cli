@@ -219,3 +219,44 @@ func TestKeychainAuthorizationFailureAndRollbackRemainClosed(t *testing.T) {
 		t.Fatal("failed authorization changed config")
 	}
 }
+
+func TestMigrateStripsPlaintextImageKeyResidueOnlyWhenKeychainHoldsIt(t *testing.T) {
+	oldLoad, oldSave := runtimeKeyLoad, runtimeKeySave
+	t.Cleanup(func() { runtimeKeyLoad, runtimeKeySave = oldLoad, oldSave })
+	xor := 7
+	for _, tc := range []struct {
+		name      string
+		recordKey string
+		wantStrip bool
+	}{
+		{"keychain holds image key", "synthetic-image", true},
+		{"keychain lacks image key", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("WECHAT_CLI_CONFIG", filepath.Join(t.TempDir(), "config.json"))
+			record := keystore.Record{SchemaVersion: 1, WxID: "fixture", DBRoot: "/fixture", Keys: map[string]string{"salt": "key"}, ImageKey: tc.recordKey, ImageXORKey: &xor, KeyEpoch: 1}
+			runtimeKeyLoad = func(string, string) (*keystore.Record, error) { return &record, nil }
+			runtimeKeySave = func(keystore.Record) error { t.Fatal("residue cleanup must not rewrite Keychain"); return nil }
+			p, _ := Path()
+			legacy := map[string]any{"schema_version": 3, "wxid": "fixture", "db_root": "/fixture", "key_store": "keychain", "key_store_ref": keystore.Account("/fixture", "fixture"), "key_epoch": 1, "image_key": "synthetic-image", "image_xor_key": 7}
+			b, _ := json.Marshal(legacy)
+			if err := os.WriteFile(p, b, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			result, err := MigratePersistentToKeychain(func(*Config) error { t.Fatal("no backup for an already migrated config"); return nil })
+			if err != nil || result.Migrated || result.ResidueRemoved != tc.wantStrip {
+				t.Fatalf("result=%+v err=%v", result, err)
+			}
+			after, _ := os.ReadFile(p)
+			var raw map[string]any
+			_ = json.Unmarshal(after, &raw)
+			_, hasKey := raw["image_key"]
+			if hasKey == tc.wantStrip {
+				t.Fatalf("image_key present=%v after cleanup (strip=%v)", hasKey, tc.wantStrip)
+			}
+			if raw["key_store"] != "keychain" || raw["wxid"] != "fixture" {
+				t.Fatalf("cleanup changed non-secret fields: %v", raw)
+			}
+		})
+	}
+}

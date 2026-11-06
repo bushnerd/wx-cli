@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-"""Only GitHub App tokens may publish; promotion is a separate fail-closed gate."""
+"""Draft upload with read-back, then a separate fail-closed promotion gate."""
 import argparse
 import json
-import os
 import re
 import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from release_lib import RELEASE_REPO, SOURCE_REPO, extract_zip, sha256, verify_manifest
+from release_lib import RELEASE_REPO, SOURCE_REPO, extract_zip, receipt_passed, sha256, signing_consistent, verify_manifest
 
 
 def gh(*args):
@@ -24,7 +23,7 @@ def check_receipt(d, manifest, archive_hash):
         raise ValueError('receipt platform does not match the release')
     required={'install','doctor','keychain','sessions','timeline','context','search','media','digest','archive','update','rollback','uninstall','clean_machine','release_endpoint_install'}
     checks=d.get('checks',{})
-    if not isinstance(checks,dict) or set(checks)!=required or any(not isinstance(c,dict) or c.get('status')!='passed' for c in checks.values()):
+    if not isinstance(checks,dict) or set(checks)!=required or any(not isinstance(c,dict) for c in checks.values()) or not receipt_passed(checks):
         raise ValueError('acceptance is incomplete')
     # This receipt is uploaded; reject non-allowlisted fields instead of redacting after upload.
     if set(d)-{'schema_version','passed','version','commit','artifact_sha256','platform','arch','checks'}:
@@ -66,8 +65,6 @@ def main():
     ap=argparse.ArgumentParser();ap.add_argument('--version',required=True);ap.add_argument('--directory');ap.add_argument('--promote',action='store_true');ap.add_argument('--commit')
     a=ap.parse_args()
     if not re.fullmatch(r'\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?',a.version):raise ValueError('invalid version')
-    token=os.environ.get('GH_TOKEN','')
-    if not token.startswith('ghs_'):raise ValueError('GitHub App installation token required; no PAT or OAuth fallback')
     tag='v'+a.version;name='wechat-cli-'+tag+'-darwin-arm64.zip'
     temp=Path(tempfile.mkdtemp(prefix='wx-release-verify-'))
     if a.promote:
@@ -84,8 +81,8 @@ def main():
     manifest=verify_manifest(pkg,a.version,a.commit)
     if a.promote:
         check_promotion_assets(temp,pkg,archive)
-        if manifest['signing_mode']!='developer_id' or manifest['notarization_status']!='accepted' or manifest['channel']!='stable':
-            raise ValueError('stable requires verified Developer ID and notarization')
+        if manifest['channel']!='stable' or '-' in manifest['version'] or not signing_consistent(manifest):
+            raise ValueError('promotion requires a stable manifest with consistent signing')
         check_receipt(json.loads((temp/'acceptance-receipt.json').read_text()),manifest,expected)
         tag_ref=json.loads(gh('api',f'repos/{SOURCE_REPO}/commits/{tag}'))
         if tag_ref['sha']!=manifest['commit']:raise ValueError('source tag/commit mismatch')

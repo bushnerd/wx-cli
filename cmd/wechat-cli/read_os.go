@@ -125,9 +125,11 @@ func (s *server) readOSDoctor() map[string]any {
 	}
 	if stateDir, err := appStateDir(); err == nil {
 		paths["state"] = stateDir
-		if cache, err := cachePathsFor(&config.Config{}); err == nil {
-			paths["cache_root"] = cache.RootDir
-			paths["cache_index"] = cache.IndexPath
+		if cfg, err := s.activeConfigNoSetup(); err == nil {
+			if cache, err := cachePathsFor(cfg); err == nil {
+				paths["cache_root"] = cache.RootDir
+				paths["cache_index"] = cache.IndexPath
+			}
 		}
 	}
 	if wxkeyPath, err := wxkey.FindBinary(); err == nil {
@@ -278,12 +280,12 @@ func (s *server) readOSStatus(includeDebug bool) map[string]any {
 						if fresh, reason, err := s.cacheFreshness(cfg, paths); err == nil && !fresh && reason != "" {
 							cache["metadata_stale_reason"] = metadataStatusReason(reason)
 							if staleCacheIndexUsable(reason) {
-								cache["degraded"] = true
-								degradedBy = appendUniqueStrings(degradedBy, "metadata_cache_stale")
-								warnings = appendUniqueStrings(warnings, "metadata_cache_degraded")
-								if readiness == "ready" {
-									readiness = "degraded"
-								}
+								// WeChat rewrites session.db on every message, so a usable
+								// index is stale most of the time. Readers keep serving it
+								// and refresh in the background; that is normal operation,
+								// not a degraded runtime.
+								cache["stale"] = true
+								cache["refresh"] = "automatic"
 							} else {
 								cache["blocked_reason"] = metadataStatusReason(reason)
 								cache["degraded"] = true

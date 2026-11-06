@@ -13,11 +13,11 @@ from release_lib import extract_zip, safe_name, verify_manifest, verify_acceptan
 from verify_bootstrap import verify_and_extract
 
 class PreviewBootstrap(unittest.TestCase):
-    def package(self, root, channel='candidate', version='2.0.1-rc.5', bad_hash=False):
+    def package(self, root, channel='candidate', version='2.0.1-rc.5', bad_hash=False, signing=('adhoc','not_configured')):
         payload=b'#!/bin/zsh\nprint -r -- \'{"ok":true,"status":"dry_run"}\'\n'
         manifest={'schema_version':2,'source_repository':'r266-tech/wx-cli','version':version,
                   'platform_arch':'darwin-arm64','commit':'a'*40,'channel':channel,
-                  'signing_mode':'adhoc','notarization_status':'not_configured',
+                  'signing_mode':signing[0],'notarization_status':signing[1],
                   'artifacts':{'install.sh':{'bytes':len(payload),'sha256':'0'*64 if bad_hash else hashlib.sha256(payload).hexdigest()}}}
         p=Path(root)/'preview.zip'
         with zipfile.ZipFile(p,'w') as z:
@@ -32,6 +32,16 @@ class PreviewBootstrap(unittest.TestCase):
             with self.assertRaises(ValueError):verify_and_extract(p,dest,'2.0.1-rc.5')
             self.assertFalse(dest.exists())
             self.assertTrue((verify_and_extract(p,dest,'2.0.1-rc.5',True)/'install.sh').is_file())
+
+    def test_stable_accepts_consistent_signing_without_opt_in(self):
+        for signing in (('adhoc','not_configured'),('developer_id','accepted')):
+            with self.subTest(signing=signing),tempfile.TemporaryDirectory() as d:
+                p=self.package(d,channel='stable',version='2.0.1',signing=signing)
+                self.assertTrue((verify_and_extract(p,Path(d)/'out','2.0.1')/'install.sh').is_file())
+        for signing in (('developer_id','not_configured'),('adhoc','accepted'),('none','not_configured')):
+            with self.subTest(signing=signing),tempfile.TemporaryDirectory() as d:
+                p=self.package(d,channel='stable',version='2.0.1',signing=signing)
+                with self.assertRaises(ValueError):verify_and_extract(p,Path(d)/'out','2.0.1')
 
     def test_preview_cannot_skip_hash_or_identity(self):
         for kw,version in (({'bad_hash':True},'2.0.1-rc.5'),({},'2.0.1-rc.6'),({'channel':'stable'},'2.0.1-rc.5'),({'version':'2.0.1'},'2.0.1')):
@@ -65,6 +75,22 @@ main --repo fixture/release --tag v2.0.1-rc.5 --allow-prerelease --json --dry-ru
 ''','fixture',str(script),str(p)],text=True,capture_output=True)
             self.assertEqual(run.returncode,0,run.stderr)
             self.assertEqual(json.loads(run.stdout),{'ok':True,'status':'dry_run'})
+
+    def test_bootstrap_rejects_plaintext_or_foreign_repository_before_download(self):
+        if not shutil.which('zsh'):
+            self.skipTest('zsh unavailable')
+        script=Path(__file__).with_name('install-release.sh').resolve()
+        for repo in ('http://github.com/r266-tech/wx-cli','https://example.com/r266-tech/wx-cli'):
+            with self.subTest(repo=repo):
+                run=subprocess.run(['zsh','-c', '''
+source "$1"
+uname() { if [[ "$1" == '-s' ]]; then print Darwin; else print arm64; fi }
+download_file() { print -u2 "DOWNLOADED $1"; return 1 }
+fetch_text() { print -u2 "DOWNLOADED $1"; return 1 }
+main --repo "$2" --tag v2.0.1 --json --dry-run
+''','fixture',str(script),repo],text=True,capture_output=True)
+                self.assertNotEqual(run.returncode,0)
+                self.assertNotIn('DOWNLOADED',run.stderr+run.stdout)
 
     def test_noncanonical_and_case_aliases_rejected_before_writes(self):
         for name in ('pkg/./install.sh', 'pkg//install.sh', 'pkg/INSTALL.SH', '.'):
@@ -153,6 +179,19 @@ class AcceptanceGate(unittest.TestCase):
                 if mutation=='none':self.module().check_receipt(receipt,manifest,'b'*64)
                 else:
                     with self.assertRaises(ValueError):self.module().check_receipt(receipt,manifest,'b'*64)
+
+    def test_post_release_checks_may_be_not_run_but_nothing_else(self):
+        required=('install','doctor','keychain','sessions','timeline','context','search','media','digest','archive','update','rollback','uninstall','clean_machine','release_endpoint_install')
+        manifest={'version':'2.0.1','commit':'a'*40}
+        def receipt(**overrides):
+            checks={k:{'status':'passed'} for k in required}
+            checks.update({k:{'status':v} for k,v in overrides.items()})
+            return dict(schema_version=1,passed=True,**manifest,artifact_sha256='b'*64,platform='darwin',arch='arm64',checks=checks)
+        self.module().check_receipt(receipt(clean_machine='not_run',release_endpoint_install='not_run'),manifest,'b'*64)
+        for status in ('failed','blocked'):
+            with self.assertRaises(ValueError):self.module().check_receipt(receipt(clean_machine=status),manifest,'b'*64)
+        for name in ('install','keychain','archive'):
+            with self.assertRaises(ValueError):self.module().check_receipt(receipt(**{name:'not_run'}),manifest,'b'*64)
 
     def assets(self, root):
         root=Path(root);pkg=root/'extract';(pkg/'scripts').mkdir(parents=True)
