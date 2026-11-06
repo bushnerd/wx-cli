@@ -61,6 +61,12 @@ def check_promotion_assets(directory, package, archive):
             raise ValueError('standalone asset differs from accepted package: '+name)
 
 
+def release_notes(manifest):
+    signing = 'Developer ID signed and Apple-notarized' if manifest.get('signing_mode') == 'developer_id' else 'ad-hoc signed, not Apple-notarized'
+    channel = 'Stable release' if manifest.get('channel') == 'stable' else 'Candidate'
+    return f'{channel} from {SOURCE_REPO} at {manifest["commit"]}; {signing}. Checksums and release-manifest.json are verified by the installer.'
+
+
 def main():
     ap=argparse.ArgumentParser();ap.add_argument('--version',required=True);ap.add_argument('--directory');ap.add_argument('--promote',action='store_true');ap.add_argument('--commit')
     a=ap.parse_args()
@@ -97,7 +103,7 @@ def main():
             side=Path(str(p)+'.sha256');side.write_text(sha256(p)+'  '+script+'\n');uploads.extend([p,side])
         latest=temp/'wechat-cli-latest-darwin-arm64.zip';shutil.copy2(archive,latest)
         side=Path(str(latest)+'.sha256');side.write_text(expected+'  '+latest.name+'\n');uploads.extend([latest,side])
-        gh('release','create',tag,*map(str,uploads),'--repo',RELEASE_REPO,'--draft','--title','wechat-cli '+tag,'--notes',f'Candidate from {SOURCE_REPO} at {manifest["commit"]}. No stable compatibility or notarization claim.')
+        gh('release','create',tag,*map(str,uploads),'--repo',RELEASE_REPO,'--draft','--title','wechat-cli '+tag,'--notes',release_notes(manifest))
         readback=temp/'download';readback.mkdir()
         gh('release','download',tag,'--repo',RELEASE_REPO,'--dir',str(readback))
         if {p.name for p in readback.iterdir()}!={p.name for p in uploads}:raise ValueError('remote asset set mismatch')

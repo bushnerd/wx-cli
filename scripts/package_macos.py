@@ -15,6 +15,11 @@ ROOT=Path(__file__).resolve().parents[1]
 def run(argv, **kw):
     subprocess.run(argv,check=True,**kw)
 
+def needs_notarization(mode):
+    """Only Developer ID builds are notarized; ad-hoc builds (stable included) are not."""
+    return mode=='developer_id'
+
+
 def main():
     ap=argparse.ArgumentParser();ap.add_argument('version');ap.add_argument('--candidate',action='store_true');ap.add_argument('--inputs',default=str(ROOT/'.build/inputs.json'))
     a=ap.parse_args()
@@ -63,7 +68,7 @@ def main():
     env['WECHAT_CLI_BUILD_INPUTS']=str(Path(a.inputs).resolve());env['WECHAT_CLI_SIGNING_MODE']=mode
     env['WECHAT_CLI_RELEASE_CHANNEL']='candidate' if a.candidate else 'stable'
     env['WECHAT_CLI_NOTARIZATION_STATUS']='not_configured'
-    if not a.candidate:
+    if needs_notarization(mode):
         # Notarize the exact executable bytes before creating the manifest.
         submit=stage/'notarize.zip'
         with zipfile.ZipFile(submit,'w',zipfile.ZIP_DEFLATED) as z:
