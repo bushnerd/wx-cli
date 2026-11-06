@@ -56,10 +56,15 @@ func TestDBFilesMissingKeysNamesUnreadableDatabases(t *testing.T) {
 	}
 	write("session/session.db", 1)
 	write("message/message_resource.db", 2)
-	write("message/message_0.db.factory/old/message_0.db", 3)
+	write("message/message_0.db.factory/old/message_0.db", 1)
 	cfg := &config.Config{DBRoot: root, Keys: map[string]string{hex.EncodeToString(bytes.Repeat([]byte{1}, 16)): "k"}}
 	got := dbFilesMissingKeys(cfg)
 	if len(got) != 1 || got[0] != "message/message_resource.db" {
 		t.Fatalf("missing keys = %#v, want only message/message_resource.db", got)
+	}
+	// The list must match what archive reads, so a keyless factory snapshot counts.
+	write("message/message_0.db.factory/old/message_0.db", 3)
+	if got := dbFilesMissingKeys(cfg); len(got) != 2 {
+		t.Fatalf("missing keys = %#v, want the factory snapshot listed too", got)
 	}
 }
