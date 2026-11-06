@@ -173,11 +173,16 @@ func (s *server) refreshKeysFromWxkey(reason string) error {
 		return fmt.Errorf("%s; wxkey setup was already attempted recently for this condition", reason)
 	}
 	s.keyRefreshLast[key] = time.Now()
-	fmt.Fprintf(os.Stderr, "[%s] %s — running wxkey key setup...\n", appName, diagnostics.Redact(reason))
-	res, stderr, err := runWxkeySetup()
-	if err != nil {
-		return fmt.Errorf("wxkey setup failed: %w\n%s\nOn macOS, run `wxkey bootstrap` once to prepare the no-SIP key cache. On Windows, keep WeChat logged in, verify WECHAT_CLI_DB_ROOT matches the logged-in account, then retry.", err, stderr)
+	if until, cooling := wxkeyCoolingDown("setup"); cooling {
+		return fmt.Errorf("%s; automatic wxkey setup failed recently, next attempt after %s. Run `~/.local/share/wechat-cli/wxkey bootstrap` to capture keys now", reason, until.Format("15:04"))
 	}
+	fmt.Fprintf(os.Stderr, "[%s] %s — running wxkey key setup...\n", appName, diagnostics.Redact(reason))
+	res, _, err := runWxkeySetup()
+	if err != nil {
+		markWxkeyFailed("setup")
+		return fmt.Errorf("%w\nOn macOS, run `wxkey bootstrap` once to prepare the no-SIP key cache. On Windows, keep WeChat logged in, verify WECHAT_CLI_DB_ROOT matches the logged-in account, then retry.", err)
+	}
+	clearWxkeyFailed("setup")
 	beforeCount := 0
 	if s.cfg != nil {
 		beforeCount = len(s.cfg.Keys)
@@ -286,11 +291,16 @@ func (s *server) refreshImageKeyFromWxkey(reason string, force bool) error {
 		return fmt.Errorf("%s; wxkey image-key was already attempted recently", reason)
 	}
 	s.imageKeyRefreshLast = time.Now()
-	fmt.Fprintf(os.Stderr, "[%s] %s — running wxkey image-key setup...\n", appName, diagnostics.Redact(reason))
-	img, stderr, err := runWxkeyImageKey(root)
-	if err != nil {
-		return fmt.Errorf("wxkey image-key failed: %w\n%s\nOn macOS, run `wxkey bootstrap` once to prepare the no-SIP key cache, keep WeChat logged in, open an image chat, then retry.", err, stderr)
+	if until, cooling := wxkeyCoolingDown("image-key"); cooling {
+		return fmt.Errorf("%s; automatic wxkey image-key failed recently, next attempt after %s", reason, until.Format("15:04"))
 	}
+	fmt.Fprintf(os.Stderr, "[%s] %s — running wxkey image-key setup...\n", appName, diagnostics.Redact(reason))
+	img, _, err := runWxkeyImageKey(root)
+	if err != nil {
+		markWxkeyFailed("image-key")
+		return fmt.Errorf("%w\nOn macOS, run `wxkey bootstrap` once to prepare the no-SIP key cache, keep WeChat logged in, open an image chat, then retry.", err)
+	}
+	clearWxkeyFailed("image-key")
 	if img == nil || strings.TrimSpace(img.Key) == "" {
 		return fmt.Errorf("wxkey image-key completed without an image_key")
 	}
@@ -3099,7 +3109,11 @@ func (s *server) enrichMessageMediaResources(rows []wcdb.Row) error {
 
 	db, err := s.openDB("message", "message_resource.db")
 	if err != nil {
-		return err
+		// Partial-key installs often lack message_resource.db. Message rows
+		// carry the same media md5 in packed_info_data, so image and video
+		// paths stay resolvable; file attachments may still be missing.
+		s.attachMediaResourceRowsToMessages(rows, s.messageResourceFallbackRows(byTalker))
+		return mediaIndexUnavailable(err)
 	}
 	defer db.Close()
 
@@ -3147,6 +3161,63 @@ func (s *server) enrichMessageMediaResources(rows []wcdb.Row) error {
 	}
 	s.attachMediaResourceRowsToMessages(rows, resourceRows)
 	return nil
+}
+
+// mediaIndexUnavailable keeps the warning short: the full wxkey stderr is
+// noise in every message page and is already available via status/doctor.
+func mediaIndexUnavailable(cause error) error {
+	if isMissingEncKeyErr(cause) || strings.Contains(cause.Error(), "wxkey") {
+		return fmt.Errorf("media_index_unavailable: message_resource.db has no cached key; image/video paths come from message rows, file paths may be missing; run `~/.local/share/wechat-cli/wxkey bootstrap` to capture it")
+	}
+	return fmt.Errorf("media_index_unavailable: %w", cause)
+}
+
+// messageResourceFallbackRows builds resource-shaped rows from the message
+// table itself for use when message_resource.db cannot be opened.
+func (s *server) messageResourceFallbackRows(byTalker map[string][]int64) []wcdb.Row {
+	var out []wcdb.Row
+	for talker, ids := range byTalker {
+		ids = uniqueInt64s(ids)
+		if talker == "" || len(ids) == 0 {
+			continue
+		}
+		tableName := "Msg_" + talkerHash(talker)
+		shards, err := s.findMsgDBs(tableName)
+		if err != nil {
+			continue
+		}
+		func() {
+			defer closeMsgDBs(shards)
+			for _, shard := range shards {
+				for start := 0; start < len(ids); start += 500 {
+					end := min(start+500, len(ids))
+					chunk := ids[start:end]
+					ph := make([]string, len(chunk))
+					args := make([]any, 0, len(chunk))
+					for i, id := range chunk {
+						ph[i] = "?"
+						args = append(args, id)
+					}
+					rows, err := shard.DB.Query(fmt.Sprintf(`SELECT local_id, server_id, create_time, local_type, packed_info_data
+						FROM %s WHERE local_id IN (%s)`, quoteIdent(tableName), strings.Join(ph, ",")), args...)
+					if err != nil {
+						continue
+					}
+					for _, r := range rows {
+						out = append(out, wcdb.Row{
+							"talker":              talker,
+							"message_local_type":  rowInt64(r, "local_type"),
+							"message_create_time": rowInt64(r, "create_time"),
+							"message_local_id":    rowInt64(r, "local_id"),
+							"message_svr_id":      rowInt64(r, "server_id"),
+							"message_packed_info": rowBytes(r, "packed_info_data"),
+						})
+					}
+				}
+			}
+		}()
+	}
+	return out
 }
 
 func messageMayHaveMedia(baseKind int64, kindName string) bool {

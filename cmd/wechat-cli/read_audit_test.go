@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/r266-tech/wx-cli/v2/internal/config"
 	"github.com/r266-tech/wx-cli/v2/internal/wcdb"
@@ -647,5 +648,39 @@ func TestTimelineSenderLookupFailureIsNotEmptySuccess(t *testing.T) {
 		if _, ok := msg["is_from_me"]; ok {
 			t.Fatalf("unknown sender reported as known ownership: %#v", msg)
 		}
+	}
+}
+
+func TestMediaIndexFallbackResolvesImagePathFromMessagePackedInfo(t *testing.T) {
+	s, _ := liveSessionFixture(t)
+	talker := "fixture_media@chatroom"
+	md5Value := "0f8543dd207d4db029940210f215d4af"
+	// Shape observed in WeChat 4.x Msg.packed_info_data: field 3 wraps the
+	// 32-char media md5 that names the .dat file.
+	packed := "08EE1610021A222220" + fmt.Sprintf("%X", md5Value)
+	addReadFixtureDB(t, s, "message/message_0.db", fmt.Sprintf(`
+		CREATE TABLE Name2Id (user_name TEXT);
+		INSERT INTO Name2Id VALUES ('fixture_sender');
+		CREATE TABLE %s (local_id INTEGER, server_id INTEGER, local_type INTEGER,
+			sort_seq INTEGER, real_sender_id INTEGER, create_time INTEGER, status INTEGER,
+			message_content TEXT, source TEXT, packed_info_data BLOB);
+		INSERT INTO %s VALUES (1,101,3,1793874559,1,1793874559,0,'<msg><img/></msg>','',X'%s');`,
+		quoteIdent("Msg_"+talkerHash(talker)), quoteIdent("Msg_"+talkerHash(talker)), packed))
+	month := time.Unix(1793874559, 0).Format("2006-01")
+	dat := filepath.Join(s.cfg.DBRoot, "msg", "attach", talkerHash(talker), month, "Img", md5Value+"_t.dat")
+	if err := os.MkdirAll(filepath.Dir(dat), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dat, []byte("not a real image"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WECHAT_CLI_STRICT_READ_ONLY", "1")
+	rows := enrichMessages([]wcdb.Row{{"talker": talker, "local_id": int64(1), "server_id": int64(101), "create_time": int64(1793874559), "base_kind": int64(3), "kind_name": "image", "message_content": "<msg><img/></msg>"}})
+	err := s.enrichMessageMediaResources(rows)
+	if err == nil || !strings.HasPrefix(err.Error(), "media_index_unavailable") {
+		t.Fatalf("missing message_resource.db must surface a short media_index_unavailable warning, got %v", err)
+	}
+	if paths := stringSliceAny(rows[0]["media_local_paths"]); len(paths) != 1 || paths[0] != dat {
+		t.Fatalf("image path was not resolved from packed_info_data: %#v", rows[0])
 	}
 }
