@@ -811,7 +811,7 @@ var toolDefs = []toolDef{
 	},
 	{
 		Name:        "image_key_refresh",
-		Description: "仅 Windows: 手动扫描已登录的 WeChat/Weixin 进程，验证并缓存 V4 image_key. 成功响应只返回扫描统计和缓存状态，绝不返回 raw image_key. 失败时请保持微信登录，打开任意图片并点击“查看原图”后重试.",
+		Description: "仅 Windows: 手动扫描已登录的 WeChat/Weixin 进程，验证并缓存 V4 image_key. 成功响应只返回扫描统计和缓存状态，绝不返回 raw image_key. 失败时请保持 PC 版微信登录，在聊天中实际打开图片并等待加载完成；如有原图/下载/保存图片操作，执行一次后再重试.",
 		InputSchema: jsonSchema(props{}, nil),
 	},
 	{

@@ -1246,9 +1246,9 @@ func cliErrorAdvice(errCode, message, tool, command string) cliAdvice {
 		}
 	}
 	switch {
-	case strings.Contains(msg, "查看原图") || strings.Contains(msg, "image-key refresh") || strings.Contains(msg, "image_key") && strings.Contains(msg, "decrypt"):
+	case strings.Contains(msg, "查看原图") || strings.Contains(msg, "image-key refresh") || (strings.Contains(msg, "image_key") && (strings.Contains(msg, "decrypt") || strings.Contains(msg, "open an image in"))):
 		return cliAdvice{
-			NextAction:        "Keep WeChat logged in, open any image, click \"查看原图\" (View Original), then retry image-key refresh or the original image read.",
+			NextAction:        "Keep Windows WeChat logged in, open an image in the desktop client and wait for it to finish loading; if the client offers an original/download/save action, use it once, then retry image-key refresh or the original image read.",
 			SuggestedCommands: []string{appName + " image-key refresh", appName + " status --pretty"},
 		}
 	case strings.Contains(msg, "message_cursor_source_incomplete"):

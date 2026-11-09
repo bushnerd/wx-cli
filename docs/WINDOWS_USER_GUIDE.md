@@ -165,7 +165,8 @@ If a future WeChat build uses a different process name:
 ## Manually Refresh The V4 Image Key
 
 When a V4 image `.dat` cannot be decoded, keep Windows WeChat logged in, open
-any image, and click **查看原图** (View Original). Then run:
+an image in the desktop client, and wait for it to finish loading. If the
+client offers an original/download/save action, use it once. Then run:
 
 ```powershell
 D:\wechat-cli\wechat-cli.exe image-key refresh
@@ -257,10 +258,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -All -Yes -Jso
 
 ### V4 image decode failed
 
-Keep WeChat logged in, open any image, click **查看原图** (View Original), then
-retry `image-key refresh` and the original media command. If the command still
-fails, confirm `WECHAT_CLI_DB_ROOT` points to the account directory that directly
-contains `db_storage` and that the running WeChat process belongs to that account.
+Keep Windows WeChat logged in, open an image in the desktop client, and wait
+for it to finish loading. If the client offers an original/download/save
+action, use it once, then retry `image-key refresh` and the original media
+command. If the command still fails, confirm `WECHAT_CLI_DB_ROOT` points to the
+account directory that directly contains `db_storage` and that the running
+WeChat process belongs to that account.
 
 ### DLL not found
 

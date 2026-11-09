@@ -49,7 +49,7 @@ Windows 上如果 V4 图片 `.dat` 解码失败，可手动刷新并缓存 image
 wechat-cli image-key refresh
 ```
 
-命令只返回扫描统计和缓存状态，绝不打印 raw key。重试前请保持微信登录，打开任意图片并点击“查看原图”；macOS 继续沿用图片读取时的自动刷新行为。
+命令只返回扫描统计和缓存状态，绝不打印 raw key。重试前请保持 PC 版微信登录，在聊天中实际打开任意图片并等待完整加载；如果客户端提供“原图/下载/保存图片”操作，执行一次后再重试；macOS 继续沿用图片读取时的自动刷新行为。
 
 默认只安装 CLI，不注册外部 agent 协议，也不安装后台 watcher。安装位置：
 
@@ -275,7 +275,7 @@ Windows：
 | 名字解析失败或有重名 | 先运行 `resolve-chat`，再把返回的 raw username 传给 `--chat/--talker` |
 | 某个聊天缺 key | 在微信中打开对应聊天，随后由 agent 重跑 `wxkey bootstrap` / `doctor` |
 | macOS 频繁弹隐私授权 | 给安装目录中的 `wechat-cli` 与 `wxkey` 加 Full Disk Access |
-| 图片只有 warning | Windows：保持微信登录，打开任意图片并点击“查看原图”，运行 `wechat-cli image-key refresh` 后重试；macOS 继续沿用自动 image-key 诊断 |
+| 图片只有 warning | Windows：保持 PC 版微信登录，在聊天中实际打开图片并等待完整加载；如有“原图/下载/保存图片”操作，执行一次后运行 `wechat-cli image-key refresh` 重试；macOS 继续沿用自动 image-key 诊断 |
 | Windows 首次刷新失败 | 确认微信登录，且 `WECHAT_CLI_DB_ROOT` 直接包含 `db_storage` |
 | `zsh: killed`，连 `--help` 都失败 | 重新运行 release bootstrap；旧二进制可能无法自更新 |
 

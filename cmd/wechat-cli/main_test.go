@@ -171,11 +171,11 @@ func TestImageKeyRefreshResponseNeverIncludesRawKey(t *testing.T) {
 }
 
 func TestImageKeyDecodeFailureAdviceIsActionable(t *testing.T) {
-	advice := cliErrorAdvice("tool_error", `WeChat v4 image .dat requires image_key; click "查看原图" and retry`, "image_key_refresh", "image-key refresh")
+	advice := cliErrorAdvice("tool_error", `WeChat v4 image .dat requires image_key; open an image in the Windows desktop client and wait for it to finish loading, then retry`, "image_key_refresh", "image-key refresh")
 	if !strings.Contains(advice.NextAction, "保持") && !strings.Contains(advice.NextAction, "Keep") {
 		t.Fatalf("next action does not request keeping WeChat logged in: %q", advice.NextAction)
 	}
-	if !strings.Contains(advice.NextAction, "查看原图") || len(advice.SuggestedCommands) == 0 || advice.SuggestedCommands[0] != appName+" image-key refresh" {
+	if !strings.Contains(advice.NextAction, "open an image in the desktop client") || len(advice.SuggestedCommands) == 0 || advice.SuggestedCommands[0] != appName+" image-key refresh" {
 		t.Fatalf("image-key retry advice = %#v", advice)
 	}
 }

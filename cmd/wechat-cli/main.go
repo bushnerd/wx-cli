@@ -330,7 +330,7 @@ func (s *server) refreshImageKeyFromWxkey(reason string, force bool) error {
 	return nil
 }
 
-const windowsImageKeyRetryHint = "Keep WeChat logged in, open any image, click \"查看原图\" (View Original), then retry `wechat-cli image-key refresh`."
+const windowsImageKeyRetryHint = "Keep Windows WeChat logged in, open an image in the desktop client and wait for it to finish loading; if the client offers an original/download/save action, use it once, then retry `wechat-cli image-key refresh`."
 
 func imageKeyRefreshFailureHint() string {
 	if runtime.GOOS == "windows" {

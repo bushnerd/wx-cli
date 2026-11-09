@@ -5,6 +5,7 @@ package wxkey
 import (
 	"bytes"
 	"crypto/aes"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -45,7 +46,7 @@ func runImageKey(root string) (*ImageKeyResult, string, error) {
 		return nil, "", err
 	}
 	if len(templates) == 0 {
-		return nil, "", fmt.Errorf("no WeChat V4 image templates found under %s; keep WeChat logged in, open any image, click \"查看原图\" (View Original), then retry", attachDir)
+		return nil, "", fmt.Errorf("no WeChat V4 image templates found under %s; keep Windows WeChat logged in, open an image in the desktop client and wait for it to finish loading; if the client offers an original/download/save action, use it once, then retry", attachDir)
 	}
 
 	// Keep Toolhelp's process enumeration order for image scanning. Windows
@@ -56,7 +57,7 @@ func runImageKey(root string) (*ImageKeyResult, string, error) {
 		return nil, "", err
 	}
 	if len(procs) == 0 {
-		return nil, "", errors.New("no running Weixin.exe/WeChat.exe process found; keep WeChat logged in, open any image, click \"查看原图\" (View Original), then retry")
+		return nil, "", errors.New("no running Weixin.exe/WeChat.exe process found; keep Windows WeChat logged in, open an image in the desktop client and wait for it to finish loading; if the client offers an original/download/save action, use it once, then retry")
 	}
 
 	deadline := time.Now().Add(imageScanTimeout())
@@ -314,20 +315,74 @@ func imageFormat(data []byte) string {
 	case len(data) >= 4 && string(data[:4]) == "wxgf":
 		// WeChat's HEVC image container (used by some original images).
 		return "hevc"
-	case len(data) >= 3 && data[0] == 0xff && data[1] == 0xd8 && data[2] == 0xff:
+	case validJPEGHeader(data):
 		return "jpg"
-	case len(data) >= 4 && string(data[:4]) == "\x89PNG":
+	case validPNGHeader(data):
 		return "png"
-	case len(data) >= 3 && string(data[:3]) == "GIF":
+	case validGIFHeader(data):
 		return "gif"
-	case len(data) >= 2 && string(data[:2]) == "BM":
+	case validBMPHeader(data):
 		return "bmp"
-	case len(data) >= 12 && string(data[:4]) == "RIFF" && string(data[8:12]) == "WEBP":
+	case validWEBPHeader(data):
 		return "webp"
-	case len(data) >= 4 && data[0] == 0x49 && data[1] == 0x49 && data[2] == 0x2a && data[3] == 0x00:
+	case validTIFFHeader(data):
 		return "tif"
 	default:
 		return ""
+	}
+}
+
+// The scanner only decrypts one AES block from each V2 attachment. Validate
+// enough of each format's fixed header to reject random magic-byte collisions
+// without requiring a full image decode during process-memory scanning.
+func validJPEGHeader(data []byte) bool {
+	return len(data) >= 4 && data[0] == 0xff && data[1] == 0xd8 && data[2] == 0xff && data[3] != 0x00 && data[3] != 0xff
+}
+
+func validPNGHeader(data []byte) bool {
+	return len(data) >= 16 && string(data[:8]) == "\x89PNG\r\n\x1a\n" && binary.BigEndian.Uint32(data[8:12]) == 13 && string(data[12:16]) == "IHDR"
+}
+
+func validGIFHeader(data []byte) bool {
+	if len(data) < 10 || (string(data[:6]) != "GIF87a" && string(data[:6]) != "GIF89a") {
+		return false
+	}
+	return binary.LittleEndian.Uint16(data[6:8]) > 0 && binary.LittleEndian.Uint16(data[8:10]) > 0
+}
+
+func validBMPHeader(data []byte) bool {
+	if len(data) < 16 || string(data[:2]) != "BM" {
+		return false
+	}
+	fileSize := binary.LittleEndian.Uint32(data[2:6])
+	pixelOffset := binary.LittleEndian.Uint32(data[10:14])
+	dibSize := binary.LittleEndian.Uint16(data[14:16])
+	if fileSize < 26 || pixelOffset < 26 || pixelOffset > fileSize {
+		return false
+	}
+	switch dibSize {
+	case 12, 40, 52, 56, 108, 124:
+		return true
+	default:
+		return false
+	}
+}
+
+func validWEBPHeader(data []byte) bool {
+	return len(data) >= 12 && string(data[:4]) == "RIFF" && binary.LittleEndian.Uint32(data[4:8]) >= 4 && string(data[8:12]) == "WEBP"
+}
+
+func validTIFFHeader(data []byte) bool {
+	if len(data) < 8 {
+		return false
+	}
+	switch {
+	case data[0] == 'I' && data[1] == 'I' && binary.LittleEndian.Uint16(data[2:4]) == 42:
+		return binary.LittleEndian.Uint32(data[4:8]) >= 8 && binary.LittleEndian.Uint32(data[4:8])%2 == 0
+	case data[0] == 'M' && data[1] == 'M' && binary.BigEndian.Uint16(data[2:4]) == 42:
+		return binary.BigEndian.Uint32(data[4:8]) >= 8 && binary.BigEndian.Uint32(data[4:8])%2 == 0
+	default:
+		return false
 	}
 }
 
