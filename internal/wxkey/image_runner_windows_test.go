@@ -4,6 +4,9 @@ package wxkey
 
 import (
 	"crypto/aes"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -44,5 +47,16 @@ func TestScanImageCandidatesAcceptsBoundedASCIIKey(t *testing.T) {
 	got, candidates, ok := scanImageCandidates(buf, [][]byte{template}, map[[16]byte]bool{})
 	if !ok || string(got[:]) != string(key) || candidates != 1 {
 		t.Fatalf("scan result = key %q candidates %d ok %v", got, candidates, ok)
+	}
+}
+
+func TestRunImageKeyMissingTemplateGuidesViewOriginal(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "msg", "attach"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := runImageKey(root)
+	if err == nil || !strings.Contains(err.Error(), "查看原图") {
+		t.Fatalf("missing-template error = %v, want View Original guidance", err)
 	}
 }

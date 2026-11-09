@@ -84,7 +84,7 @@ func toolWechatReadOnly(name string) bool {
 
 func toolLocalWriteMode(name string) string {
 	switch name {
-	case "cache_refresh", "cache_rebuild", "export_messages":
+	case "cache_refresh", "cache_rebuild", "image_key_refresh", "export_messages":
 		return "required"
 	case "digest_source", "archive_create", "archive_delete", "archive_restore", "keychain_migrate", "keychain_authorize":
 		return "required"
@@ -127,6 +127,7 @@ var conciseToolDescriptions = map[string]string{
 	"export_messages":     "显式本地文件导出; strict read-only 下禁用。普通读取优先 timeline/context。",
 	"cache_refresh":       "显式刷新 contacts/sessions metadata cache; strict read-only 下禁用。",
 	"cache_rebuild":       "显式重建 metadata cache; strict read-only 下禁用。",
+	"image_key_refresh":   "手动扫描已登录的 Windows 微信进程并缓存 V4 image_key; 成功响应不会输出密钥。",
 }
 
 func cloneSchemaValue(v any) any {
@@ -237,7 +238,7 @@ func toolInProfile(name, profile string) bool {
 		}
 	case "maintenance":
 		switch name {
-		case "cache_status", "cache_refresh", "cache_rebuild", "export_messages", "schema", "sql", "archive_create", "archive_validate", "archive_list", "archive_delete", "archive_restore", "keychain_status", "keychain_migrate", "keychain_authorize":
+		case "cache_status", "cache_refresh", "cache_rebuild", "image_key_refresh", "export_messages", "schema", "sql", "archive_create", "archive_validate", "archive_list", "archive_delete", "archive_restore", "keychain_status", "keychain_migrate", "keychain_authorize":
 			return true
 		}
 	}
@@ -806,6 +807,11 @@ var toolDefs = []toolDef{
 	{
 		Name:        "cache_rebuild",
 		Description: "删除当前 wechat-cli cache 目录后完整重建 metadata snapshot cache + index.sqlite.",
+		InputSchema: jsonSchema(props{}, nil),
+	},
+	{
+		Name:        "image_key_refresh",
+		Description: "仅 Windows: 手动扫描已登录的 WeChat/Weixin 进程，验证并缓存 V4 image_key. 成功响应只返回扫描统计和缓存状态，绝不返回 raw image_key. 失败时请保持微信登录，打开任意图片并点击“查看原图”后重试.",
 		InputSchema: jsonSchema(props{}, nil),
 	},
 	{

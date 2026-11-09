@@ -45,7 +45,7 @@ func runImageKey(root string) (*ImageKeyResult, string, error) {
 		return nil, "", err
 	}
 	if len(templates) == 0 {
-		return nil, "", fmt.Errorf("no WeChat V4 image templates found under %s; open an original image in WeChat first", attachDir)
+		return nil, "", fmt.Errorf("no WeChat V4 image templates found under %s; keep WeChat logged in, open any image, click \"查看原图\" (View Original), then retry", attachDir)
 	}
 
 	// Keep Toolhelp's process enumeration order for image scanning. Windows
@@ -56,7 +56,7 @@ func runImageKey(root string) (*ImageKeyResult, string, error) {
 		return nil, "", err
 	}
 	if len(procs) == 0 {
-		return nil, "", errors.New("no running Weixin.exe/WeChat.exe process found; keep WeChat logged in and open an image")
+		return nil, "", errors.New("no running Weixin.exe/WeChat.exe process found; keep WeChat logged in, open any image, click \"查看原图\" (View Original), then retry")
 	}
 
 	deadline := time.Now().Add(imageScanTimeout())
@@ -82,7 +82,7 @@ func runImageKey(root string) (*ImageKeyResult, string, error) {
 			Candidates:     candidates,
 		}, fmt.Sprintf("Windows image-key scan OK: verified image key from PID %d\n", proc.pid), nil
 	}
-	return nil, "", fmt.Errorf("Windows WeChat process memory did not contain a verifiable V4 image key (templates=%d regions=%d bytes=%d candidates=%d: %v); keep an original image open and retry", len(templates), totalRegions, totalBytes, totalCandidates, lastErr)
+	return nil, "", fmt.Errorf("Windows WeChat process memory did not contain a verifiable V4 image key (templates=%d regions=%d bytes=%d candidates=%d: %v)", len(templates), totalRegions, totalBytes, totalCandidates, lastErr)
 }
 
 func windowsImageTargetProcesses() ([]windowsProcess, error) {

@@ -86,6 +86,8 @@ var cliCommandSpecs = []cliCommandSpec{
 	{Command: "cache status", Tool: "cache_status", Usage: appName + " cache status", Examples: []string{appName + " cache status"}},
 	{Command: "cache refresh", Tool: "cache_refresh", Usage: appName + " cache refresh [--force] [--background]", Examples: []string{appName + " cache refresh --force"}},
 	{Command: "cache rebuild", Tool: "cache_rebuild", Usage: appName + " cache rebuild", Examples: []string{appName + " cache rebuild"}},
+	{Command: "image-key", Usage: appName + " image-key <refresh>", Description: "Windows WeChat V4 image_key maintenance commands. The key is cached locally and never printed.", Examples: []string{appName + " image-key refresh"}},
+	{Command: "image-key refresh", Tool: "image_key_refresh", Usage: appName + " image-key refresh", Description: "Manually scan the logged-in Windows WeChat process for a V4 image_key and cache it without printing the key.", Examples: []string{appName + " image-key refresh"}},
 	{Command: "sessions", Tool: "sessions", Usage: appName + " sessions [--limit 20] [--type-filter private,group]", Examples: []string{appName + " sessions --limit 20", appName + ` sessions --type-filter group --keyword "$KEYWORD"`}},
 	{Command: "resolve-chat", Aliases: []string{"resolve_chat"}, Tool: "resolve_chat", Usage: appName + " resolve-chat <chat> [--type-filter private]", Positional: "query", Examples: []string{appName + ` resolve-chat "$CHAT" --type-filter group`}},
 	{Command: "contacts", Tool: "contacts", Usage: appName + " contacts [--keyword 李] [--label 客户|--label-id 5]", Examples: []string{appName + " contacts --keyword 李 --limit 20", appName + ` contacts --label "$LABEL" --limit 50`}},
@@ -231,6 +233,13 @@ func maybeRunCLI(args []string) bool {
 		return true
 	case "cache":
 		runCacheCLI(args[1:], opts)
+		return true
+	case "image-key", "image_key":
+		if len(args) < 2 || args[1] != "refresh" {
+			runCLIHelp("image-key", opts)
+			return true
+		}
+		runToolCLI("image_key_refresh", parseKVFlags(args[2:]), opts, "image-key refresh")
 		return true
 	case "resolve-chat", "resolve_chat":
 		flags := parseKVFlags(args[1:])
@@ -591,6 +600,8 @@ func runToolResult(name string, flags map[string]any, command string) (any, stri
 		result, err = srv.toolCacheRefresh(flags)
 	case "cache_rebuild":
 		result, err = srv.toolCacheRebuild(flags)
+	case "image_key_refresh":
+		result, err = srv.toolImageKeyRefresh(flags)
 	case "stats":
 		result, err = srv.toolStats(flags)
 	case "unread":
@@ -1111,6 +1122,7 @@ func cliToolNames() []string {
 		"cache_status",
 		"cache_refresh",
 		"cache_rebuild",
+		"image_key_refresh",
 		"stats",
 		"unread",
 		"export_messages",
@@ -1234,6 +1246,11 @@ func cliErrorAdvice(errCode, message, tool, command string) cliAdvice {
 		}
 	}
 	switch {
+	case strings.Contains(msg, "查看原图") || strings.Contains(msg, "image-key refresh") || strings.Contains(msg, "image_key") && strings.Contains(msg, "decrypt"):
+		return cliAdvice{
+			NextAction:        "Keep WeChat logged in, open any image, click \"查看原图\" (View Original), then retry image-key refresh or the original image read.",
+			SuggestedCommands: []string{appName + " image-key refresh", appName + " status --pretty"},
+		}
 	case strings.Contains(msg, "message_cursor_source_incomplete"):
 		return cliAdvice{
 			NextAction:        "Keep the existing cursor and retry after every message shard is readable; do not advance from partial data.",
@@ -1526,12 +1543,14 @@ func helpTargetForCommand(args []string) string {
 	if len(args) == 0 {
 		return ""
 	}
-	if args[0] == "cache" || args[0] == "asr" || args[0] == "voice-asr" || args[0] == "voice_asr" {
+	if args[0] == "cache" || args[0] == "asr" || args[0] == "voice-asr" || args[0] == "voice_asr" || args[0] == "image-key" || args[0] == "image_key" {
 		for _, a := range args[1:] {
 			if a != "-h" && a != "--help" {
-				prefix := "cache"
+				prefix := args[0]
 				if args[0] != "cache" {
-					prefix = "asr"
+					if args[0] == "asr" || args[0] == "voice-asr" || args[0] == "voice_asr" {
+						prefix = "asr"
+					}
 				}
 				return prefix + " " + a
 			}
@@ -1539,7 +1558,10 @@ func helpTargetForCommand(args []string) string {
 		if args[0] == "cache" {
 			return "cache"
 		}
-		return "asr"
+		if args[0] == "asr" || args[0] == "voice-asr" || args[0] == "voice_asr" {
+			return "asr"
+		}
+		return "image-key"
 	}
 	return args[0]
 }

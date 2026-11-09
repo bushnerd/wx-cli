@@ -298,7 +298,7 @@ func (s *server) refreshImageKeyFromWxkey(reason string, force bool) error {
 	img, _, err := runWxkeyImageKey(root)
 	if err != nil {
 		markWxkeyFailed("image-key")
-		return fmt.Errorf("%w\nOn macOS, run `wxkey bootstrap` once to prepare the no-SIP key cache, keep WeChat logged in, open an image chat, then retry.", err)
+		return fmt.Errorf("%w\n%s", err, imageKeyRefreshFailureHint())
 	}
 	clearWxkeyFailed("image-key")
 	if img == nil || strings.TrimSpace(img.Key) == "" {
@@ -313,7 +313,9 @@ func (s *server) refreshImageKeyFromWxkey(reason string, force bool) error {
 			return err
 		}
 		current.ImageKey = strings.TrimSpace(img.Key)
-		current.ImageXORKey = img.XORKey
+		if img.XORKey != nil {
+			current.ImageXORKey = img.XORKey
+		}
 		return nil
 	}); err != nil {
 		return fmt.Errorf("save image_key config: %w", err)
@@ -326,6 +328,91 @@ func (s *server) refreshImageKeyFromWxkey(reason string, force bool) error {
 	s.ok = fresh.Ready()
 	fmt.Fprintf(os.Stderr, "[%s] wxkey image-key OK — image_key cached\n", appName)
 	return nil
+}
+
+const windowsImageKeyRetryHint = "Keep WeChat logged in, open any image, click \"查看原图\" (View Original), then retry `wechat-cli image-key refresh`."
+
+func imageKeyRefreshFailureHint() string {
+	if runtime.GOOS == "windows" {
+		return windowsImageKeyRetryHint
+	}
+	return "On macOS, run `wxkey bootstrap` once to prepare the no-SIP key cache, keep WeChat logged in, open an image chat, then retry."
+}
+
+// toolImageKeyRefresh is the explicit public refresh path. It deliberately
+// returns only scan metadata: the raw image key is persisted through config
+// and is never part of the CLI response.
+func (s *server) toolImageKeyRefresh(_ map[string]any) (any, error) {
+	if strictReadOnlyMode() {
+		return nil, fmt.Errorf("strict_read_only: image-key refresh is disabled")
+	}
+	if runtime.GOOS != "windows" {
+		return nil, fmt.Errorf("image-key refresh is supported on Windows only; existing macOS image-key behavior is automatic during image decoding")
+	}
+	if envFirst("WECHAT_CLI_IMAGE_KEY", "WX_MCP_IMAGE_KEY") != "" {
+		return nil, fmt.Errorf("WECHAT_CLI_IMAGE_KEY is set; unset the explicit image_key environment override before refreshing")
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, fmt.Errorf("load image-key config: %w", err)
+	}
+	if cfg.DBRoot == "" {
+		root, wxid, detectErr := config.AutoDetectDBRoot()
+		if detectErr != nil {
+			return nil, fmt.Errorf("detect Windows WeChat DB root: %w\n%s", detectErr, imageKeyRefreshFailureHint())
+		}
+		cfg.DBRoot = root
+		if cfg.Wxid == "" {
+			cfg.Wxid = wxid
+		}
+	}
+	root := strings.TrimSpace(cfg.DBRoot)
+	if root == "" {
+		return nil, fmt.Errorf("Windows WeChat account root is empty\n%s", imageKeyRefreshFailureHint())
+	}
+	img, _, err := runWxkeyImageKey(root)
+	if err != nil {
+		return nil, fmt.Errorf("Windows V4 image-key refresh failed: %w\n%s", err, imageKeyRefreshFailureHint())
+	}
+	if img == nil || strings.TrimSpace(img.Key) == "" {
+		return nil, fmt.Errorf("Windows V4 image-key refresh completed without a usable image_key\n%s", imageKeyRefreshFailureHint())
+	}
+	expected := &config.Config{DBRoot: root, Wxid: cfg.Wxid}
+	if err := config.Update(func(current *config.Config) error {
+		if err := requireSameConfigAccount(expected, current); err != nil {
+			return err
+		}
+		current.ImageKey = strings.TrimSpace(img.Key)
+		if img.XORKey != nil {
+			current.ImageXORKey = img.XORKey
+		}
+		if current.DBRoot == "" {
+			current.DBRoot = root
+		}
+		if current.Wxid == "" {
+			current.Wxid = cfg.Wxid
+		}
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("save image_key config: %w", err)
+	}
+	return imageKeyRefreshResponse(img), nil
+}
+
+func imageKeyRefreshResponse(img *wxkey.ImageKeyResult) map[string]any {
+	result := map[string]any{
+		"platform":         runtime.GOOS,
+		"refreshed":        true,
+		"image_key_cached": true,
+		"raw_key_returned": false,
+	}
+	if img != nil {
+		result["template_source"] = img.TemplateSource
+		result["regions"] = img.Regions
+		result["bytes_scanned"] = img.BytesScanned
+		result["candidates"] = img.Candidates
+	}
+	return result
 }
 
 func (s *server) refreshReasonAlreadySatisfied(reason string) bool {
@@ -4171,7 +4258,7 @@ func (s *server) decodeWechatV4ImageDAT(data []byte, siblingPaths []string) ([]b
 			}
 			if len(keys) == 0 {
 				meta["v4_key_source"] = "missing"
-				return nil, "", meta, "needs_image_key", fmt.Errorf("WeChat v4 image .dat requires image_key; wechat-cli could not refresh it automatically")
+				return nil, "", meta, "needs_image_key", fmt.Errorf("WeChat v4 image .dat requires image_key; wechat-cli could not refresh it automatically\n%s", imageKeyRefreshFailureHint())
 			}
 		}
 	}
@@ -4199,6 +4286,9 @@ func (s *server) decodeWechatV4ImageDAT(data []byte, siblingPaths []string) ([]b
 		lastErr = fmt.Errorf("image_key did not decrypt the image")
 	}
 	meta["v4_key_source"] = "config_or_env"
+	if usesDynamicImageKey && runtime.GOOS == "windows" {
+		lastErr = fmt.Errorf("%w\n%s", lastErr, windowsImageKeyRetryHint)
+	}
 	return nil, "", meta, "decode_failed", lastErr
 }
 

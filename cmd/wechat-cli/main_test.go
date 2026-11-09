@@ -139,6 +139,47 @@ func TestCLIHelpIsDefault(t *testing.T) {
 	}
 }
 
+func TestImageKeyRefreshCommandIsPublicAndMaintenanceOnly(t *testing.T) {
+	spec, tool, ok := cliHelpForTarget("image-key refresh")
+	if !ok || spec.Tool != "image_key_refresh" || tool.Name != "image_key_refresh" {
+		t.Fatalf("image-key refresh help = %#v %#v ok=%v", spec, tool, ok)
+	}
+	if toolLocalWriteMode("image_key_refresh") != "required" {
+		t.Fatalf("image_key_refresh local write mode = %q", toolLocalWriteMode("image_key_refresh"))
+	}
+	if !toolInProfile("image_key_refresh", "maintenance") || toolInProfile("image_key_refresh", "assistant") {
+		t.Fatal("image_key_refresh profile placement is incorrect")
+	}
+	if _, _, ok := cliHelpForTarget("image_key_refresh"); !ok {
+		t.Fatal("underscore image-key alias should resolve")
+	}
+}
+
+func TestImageKeyRefreshResponseNeverIncludesRawKey(t *testing.T) {
+	raw := "0123456789abcdef0123456789abcdef"
+	data := imageKeyRefreshResponse(&wxkey.ImageKeyResult{Key: raw, TemplateSource: "local_v4_dat", Regions: 2})
+	encoded, err := json.Marshal(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), raw) || strings.Contains(string(encoded), "key") && strings.Contains(string(encoded), raw[:8]) {
+		t.Fatalf("raw image key leaked in response: %s", encoded)
+	}
+	if data["raw_key_returned"] != false || data["image_key_cached"] != true {
+		t.Fatalf("unexpected safe response: %#v", data)
+	}
+}
+
+func TestImageKeyDecodeFailureAdviceIsActionable(t *testing.T) {
+	advice := cliErrorAdvice("tool_error", `WeChat v4 image .dat requires image_key; click "查看原图" and retry`, "image_key_refresh", "image-key refresh")
+	if !strings.Contains(advice.NextAction, "保持") && !strings.Contains(advice.NextAction, "Keep") {
+		t.Fatalf("next action does not request keeping WeChat logged in: %q", advice.NextAction)
+	}
+	if !strings.Contains(advice.NextAction, "查看原图") || len(advice.SuggestedCommands) == 0 || advice.SuggestedCommands[0] != appName+" image-key refresh" {
+		t.Fatalf("image-key retry advice = %#v", advice)
+	}
+}
+
 func TestParseGlobalCLIOptions(t *testing.T) {
 	opts, args, err := parseGlobalCLIOptions([]string{"--json", "--pretty", "resolve-chat", "张三", "--compact=false"})
 	if err != nil {
@@ -2936,6 +2977,7 @@ func TestDecodeLocalImageForAgentAutoRefreshesImageKey(t *testing.T) {
 	t.Setenv("WX_MCP_CONFIG", cfgPath)
 	root := t.TempDir()
 	key := []byte("abcdefghijklmnop")
+	xorKey := 0x10
 	img := filepath.Join(root, "msg", "attach", "hash", "2026-05", "Img", "sample.dat")
 	if err := os.MkdirAll(filepath.Dir(img), 0o755); err != nil {
 		t.Fatal(err)
@@ -2944,9 +2986,10 @@ func TestDecodeLocalImageForAgentAutoRefreshesImageKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := &config.Config{
-		Wxid:   "wxid_test",
-		DBRoot: root,
-		Keys:   map[string]string{"salt": "enc"},
+		Wxid:        "wxid_test",
+		DBRoot:      root,
+		Keys:        map[string]string{"salt": "enc"},
+		ImageXORKey: &xorKey,
 	}
 	if err := config.Save(cfg); err != nil {
 		t.Fatal(err)
@@ -2984,6 +3027,24 @@ func TestDecodeLocalImageForAgentAutoRefreshesImageKey(t *testing.T) {
 	}
 	if fresh.ImageKey != hex.EncodeToString(key) {
 		t.Fatalf("saved image_key = %q, want refreshed key", fresh.ImageKey)
+	}
+	if fresh.ImageXORKey == nil || *fresh.ImageXORKey != xorKey {
+		t.Fatalf("saved image_xor_key = %#v, want preserved value %d", fresh.ImageXORKey, xorKey)
+	}
+}
+
+func TestDecodeFixedV4FailureDoesNotSuggestDynamicImageKeyRefresh(t *testing.T) {
+	key := []byte("abcdefghijklmnop")
+	data := testWechatV4ImageDAT(t, key, tinyPNG())
+	copy(data[:len(wechatV4ImageHeader1)], wechatV4ImageHeader1)
+
+	srv := &server{cfg: &config.Config{}}
+	_, _, _, status, err := srv.decodeWechatImageDAT(data, nil)
+	if status != "decode_failed" || err == nil {
+		t.Fatalf("status=%q err=%v, want decode_failed with error", status, err)
+	}
+	if strings.Contains(err.Error(), "查看原图") || strings.Contains(err.Error(), "image-key refresh") {
+		t.Fatalf("fixed-key decode error should not suggest dynamic image-key refresh: %v", err)
 	}
 }
 

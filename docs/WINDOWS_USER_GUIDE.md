@@ -162,6 +162,21 @@ If a future WeChat build uses a different process name:
 [Environment]::SetEnvironmentVariable("WECHAT_CLI_WECHAT_PROCESS", "Weixin,WeChat", "User")
 ```
 
+## Manually Refresh The V4 Image Key
+
+When a V4 image `.dat` cannot be decoded, keep Windows WeChat logged in, open
+any image, and click **查看原图** (View Original). Then run:
+
+```powershell
+D:\wechat-cli\wechat-cli.exe image-key refresh
+```
+
+The command scans the running WeChat process, verifies the V4 image key against
+the local attachment, and caches it in the existing protected wxkey-compatible
+config. Its JSON response contains scan statistics and cache status only; it
+never prints or returns the raw image key. The normal `media` and timeline
+flows retain their automatic refresh behavior.
+
 ## Verify The Install
 
 Run:
@@ -239,6 +254,13 @@ Keep Windows WeChat logged in, open one chat, then retry. On slow machines:
 $env:WECHAT_CLI_KEY_SCAN_TIMEOUT = "5m"
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -All -Yes -Json
 ```
+
+### V4 image decode failed
+
+Keep WeChat logged in, open any image, click **查看原图** (View Original), then
+retry `image-key refresh` and the original media command. If the command still
+fails, confirm `WECHAT_CLI_DB_ROOT` points to the account directory that directly
+contains `db_storage` and that the running WeChat process belongs to that account.
 
 ### DLL not found
 
