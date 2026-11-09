@@ -116,6 +116,10 @@ func RunSetup() (*SetupResult, string, error) {
 }
 
 func RunImageKey(root string) (*ImageKeyResult, string, error) {
+	return runImageKey(root)
+}
+
+func runImageKeyExternal(root string) (*ImageKeyResult, string, error) {
 	bin, err := FindBinary()
 	if err != nil {
 		return nil, "", err
